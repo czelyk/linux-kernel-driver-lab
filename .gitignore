@@ -1,0 +1,16 @@
+# Kernel module build artifacts
+*.o
+*.ko
+*.mod
+*.mod.c
+*.symvers
+*.order
+*.cmd
+*.tmp
+Module.symvers
+modules.order
+
+# Editor / OS leftovers
+.DS_Store
+*.swp
+*.swo
