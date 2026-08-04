@@ -74,10 +74,21 @@ static ssize_t ahmet_write(struct file *file,
                            size_t len,
                            loff_t *offset)
 {
-mutex_lock(&ahmet_mutex);
+    char *new_buffer;
+    mutex_lock(&ahmet_mutex);
 
     if (len > buffer_capacity)
-        len = buffer_capacity;
+        {//len = buffer_capacity;
+        new_buffer = krealloc(buffer, len, GFP_KERNEL);
+
+        if(!new_buffer)
+        {
+            mutex_unlock(&ahmet_mutex);
+            return -ENOMEM;
+        }
+        buffer = new_buffer;
+        buffer_capacity = len;
+        }
 
     if (copy_from_user(buffer, buf, len))
     {
