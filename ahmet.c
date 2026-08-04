@@ -6,8 +6,15 @@
 #include <linux/device.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
+#include  <linux/ioctl.h>
 
 #define BUFFER_SIZE 1024
+#define AHMET_IOCTL_MAGIC 'A'
+#define AHMET_CLEAR_BUFFER \
+        _IO(AHMET_IOCTL_MAGIC, 1)
+    
+#define AHMET_GET_BUFFER_SIZE \
+        _IOR(AHMET_IOCTL_MAGIC, 2, size_t)
 
 static dev_t dev_num;
 static struct cdev ahmet_cdev;
@@ -105,12 +112,35 @@ static ssize_t ahmet_write(struct file *file,
     return len;
 }
 
+
+static long ahmet_ioctl(struct file *file,
+                        unsigned int cmd,
+                        unsigned long arg)
+{
+    switch (cmd)
+    {
+        case AHMET_CLEAR_BUFFER: 
+            mutex_lock(&ahmet_mutex);
+            memset(buffer, 0, buffer_capacity);
+            buffer_size = 0;
+            mutex_unlock(&ahmet_mutex);
+            pr_info("Device buffer cleared\n");
+            return 0;
+        
+
+        default:
+            return -EINVAL;
+    }
+
+}
+
 static const struct file_operations fops = {
     .owner = THIS_MODULE,
     .open = ahmet_open,
     .release = ahmet_release,
     .read = ahmet_read,
     .write = ahmet_write,
+    .unlocked_ioctl = ahmet_ioctl,
 };
 
 static int __init ahmet_init(void)
@@ -128,6 +158,7 @@ static int __init ahmet_init(void)
         return -ENOMEM;
     }
 
+    buffer_capacity = BUFFER_SIZE;
     memset(buffer, 0, buffer_capacity);
 
     ret = alloc_chrdev_region(&dev_num, 0, 1, "ahmet");
