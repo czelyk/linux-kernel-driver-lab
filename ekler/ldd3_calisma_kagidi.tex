@@ -1,0 +1,2546 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[turkish]{babel}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{parskip}
+\usepackage{listings}
+
+\definecolor{basliknoktu}{RGB}{20,60,110}
+\definecolor{kutucerceve}{RGB}{60,60,60}
+\definecolor{kutuarkaplan}{RGB}{245,245,245}
+\definecolor{kodarkaplan}{RGB}{40,42,54}
+\definecolor{kodyazi}{RGB}{248,248,242}
+\definecolor{kodyorum}{RGB}{150,150,160}
+\definecolor{kodanahtar}{RGB}{255,184,108}
+\definecolor{linkrengi}{RGB}{20,90,140}
+
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{basliknoktu}}
+  {B\"ol\"um \thesection}{0.6em}{}
+\titleformat{\subsection}
+  {\normalfont\large\bfseries}
+  {}{0em}{}
+\titleformat{\subsubsection}
+  {\normalfont\normalsize\bfseries\itshape}
+  {}{0em}{}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=linkrengi,
+  urlcolor=linkrengi,
+  citecolor=linkrengi,
+  pdftitle={LDD3 Calisma Kagidi - Detayli},
+  pdfauthor={Ahmet Hasan Celik}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{LDD3 -- Detayl\i\ \c{C}al\i\c{s}ma Ka\u{g}\i d\i\ (B\"ol\"um 2-6)}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\lstdefinestyle{kernelc}{
+  backgroundcolor=\color{kodarkaplan},
+  basicstyle=\ttfamily\footnotesize\color{kodyazi},
+  commentstyle=\color{kodyorum}\itshape,
+  keywordstyle=\color{kodanahtar}\bfseries,
+  numberstyle=\tiny\color{kodyorum},
+  breaklines=true,
+  breakatwhitespace=false,
+  frame=single,
+  rulecolor=\color{kutucerceve},
+  framesep=4pt,
+  xleftmargin=4pt,
+  xrightmargin=4pt,
+  showstringspaces=false,
+  tabsize=4,
+  morekeywords={struct,static,const,unsigned,typedef,int,void,char,long,size_t,ssize_t,loff_t,dev_t}
+}
+\lstset{style=kernelc}
+
+\newenvironment{notkutu}[1]{%
+  \par\medskip\noindent
+  \begin{minipage}{\linewidth}
+  \begin{center}
+  \fcolorbox{kutucerceve}{kutuarkaplan}{%
+    \begin{minipage}{0.95\linewidth}
+    \vspace{2pt}
+    \textbf{#1}\par\smallskip
+}}{%
+    \vspace{2pt}
+    \end{minipage}%
+  }
+  \end{center}
+  \end{minipage}\par\medskip
+}
+
+\newenvironment{ahmetkutu}{%
+  \par\medskip\noindent
+  \begin{minipage}{\linewidth}
+  \begin{center}
+  \fcolorbox{basliknoktu}{kutuarkaplan}{%
+    \begin{minipage}{0.95\linewidth}
+    \vspace{2pt}
+    \textbf{ahmet.c ile ba\u{g}lant\i}\par\smallskip
+}}{%
+    \vspace{2pt}
+    \end{minipage}%
+  }
+  \end{center}
+  \end{minipage}\par\medskip
+}
+
+\title{\Huge Linux Device Drivers (3. Bask\i)\\[0.3em]
+\Large Detayl\i\ \c{C}al\i\c{s}ma Ka\u{g}\i d\i\ -- B\"ol\"um 2--6, 8, 10, 14}
+\author{Ahmet Hasan \c{C}elik \\ \small G\"om\"ulu Sistem Staj\i\ -- Kernel Modu\"l\"u Geli\c{s}tirme}
+\date{4 A\u{g}ustos 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{notkutu}{Bu belge nedir?}
+Bu, LDD3'ün ilk özet çalışma kağıdının \emph{derinleştirilmiş} sürümüdür.
+İlk sürümdeki 18 bölümlük kısa özet yerine, burada staj için en kritik
+sekiz bölüm -- \textbf{2 (Modülleri Derleme/Çalıştırma), 3 (Karakter
+Sürücüler), 4 (Hata Ayıklama), 5 (Eşzamanlılık), 6 (Gelişmiş Karakter
+Sürücü İşlemleri), 8 (Bellek Ayırma), 10 (Kesme Yönetimi), 14 (Linux
+Aygıt Modeli)} -- ele alınıyor, ama her biri kitabın kendisinden
+gerçekten okunarak, fonksiyon imzalarıyla, gerçek \texttt{scull} sürücüsü
+koduyla ve kitabın açıkça belirttiği tuzaklarla (gotcha) birlikte
+anlatılıyor.
+
+Amaç: bu belgeyi okuduktan sonra kitabın ilgili sayfalarını açtığında
+hiçbir kavramın "havada kalmaması" ve kendi \texttt{ahmet.c} sürücünle
+aradaki farkı/benzerliği net görebilmen.
+\end{notkutu}
+
+\tableofcontents
+
+\newpage
+
+%=================================================================
+\section{Mod\"ulleri Derleme ve \c{C}al\i\c{s}t\i rma}
+\label{sec:bolum2}
+%=================================================================
+
+\subsection{Hello World: Bir Mod\"ul\"un Anatomisi}
+
+Kitap ilk örneğini şu şekilde verir:
+
+\begin{lstlisting}
+#include <linux/init.h>
+#include <linux/module.h>
+MODULE_LICENSE("Dual BSD/GPL");
+
+static int hello_init(void)
+{
+    printk(KERN_ALERT "Hello, world\n");
+    return 0;
+}
+
+static void hello_exit(void)
+{
+    printk(KERN_ALERT "Goodbye, cruel world\n");
+}
+
+module_init(hello_init);
+module_exit(hello_exit);
+\end{lstlisting}
+
+\textbf{Kritik nokta:} fonksiyonların adı \texttt{hello\_init}/\texttt{hello\_exit}
+olması bir zorunluluk değil -- \texttt{module\_init()} ve \texttt{module\_exit()}
+birer \emph{makro}dır ve kernel'e "yüklenince/kaldırılınca hangi
+fonksiyonu çağıracağını" söyler. Sen bu fonksiyonlara istediğin ismi
+verebilirsin (senin kodunda \texttt{ahmet\_init}/\texttt{ahmet\_exit}).
+
+\begin{notkutu}{Beklenmedik ama önemli bir ayrıntı}
+Kitap açıkça bir yazım hatası tuzağına dikkat çekiyor: \texttt{KERN\_ALERT}
+ile format string'i arasında \textbf{virgül yoktur}. \texttt{printk(KERN\_ALERT,
+"...")} yazmak yaygın bir acemi hatasıdır -- \texttt{KERN\_ALERT} aslında
+bir fonksiyon parametresi değil, derleme zamanında format string'in
+başına \emph{yapıştırılan} bir string sabittir (\texttt{"<1>"} gibi).
+Yani doğrusu \texttt{printk(KERN\_ALERT "mesaj\textbackslash n")} --
+iki string derleyici tarafından otomatik birleştirilir (string
+concatenation). Neyse ki derleyici virgülü koyarsan hata verir, bu
+yüzden tehlike sınırlı.
+\end{notkutu}
+
+\subsection{Neden \texttt{printf} değil de \texttt{printk}?}
+
+Kernel'de standart C kütüphanesi (glibc) yoktur -- modülün bağlı olduğu
+tek şey kernel'in kendisidir. \texttt{printk} kernelin kendi
+\texttt{printf} benzeri fonksiyonudur (kayan nokta -- floating point --
+desteği \textbf{yoktur}, çünkü kernel modunda FP register durumunu
+kaydetme/geri yükleme maliyeti gereksiz bulunmuştur). \texttt{printk}'in
+\texttt{printf}'ten en büyük farkı: bir \textbf{öncelik seviyesi}
+(loglevel) alabilmesidir -- bunu Bölüm 4'te detaylı göreceğiz.
+
+\subsection{Uygulama ile Mod\"ul Aras\i ndaki Fark: Olay G\"ud\"uml\"u Model}
+
+Bir C uygulaması \texttt{main()}'den başlar, sırayla çalışır, biter. Bir
+kernel modülünün ise \texttt{main()}'i yoktur. \texttt{init} fonksiyonu
+"ben buradayım, şunları yapabilirim" der ve kaynakları/yeteneklerini
+\textbf{kaydedip hemen döner} -- modülün asıl işi, kayıt ettiği
+fonksiyonlar (senin \texttt{fops} tablon gibi) başka biri tarafından
+\emph{daha sonra} çağrıldığında yapılır. \texttt{exit} fonksiyonu ise
+"artık burada değilim" der, kayıt olan her şeyi geri alır.
+
+\begin{notkutu}{Önemli fark: temizlik zorunluluğu}
+Bir uygulama çöktüğünde/bittiğinde işletim sistemi onun kaynaklarını
+otomatik temizler (dosya tanıtıcıları, bellek...). Bir kernel modülünün
+\texttt{exit} fonksiyonu ise \textbf{kendi açtığı her şeyi kendisi elle
+kapatmak zorundadır} -- kernel, "bu modül şunları kaydetti" diye bir
+kayıt tutmaz. Bir kaynağı serbest bırakmayı unutursan, o kaynak sistem
+yeniden başlatılana kadar (ya da bir sonraki modül yüklemesi
+çakışana kadar) sızdırılmış kalır.
+\end{notkutu}
+
+\subsection{Kernel Stack'inin K\"u\c{c}\"ukl\"u\u{g}\"u}
+
+Kitabın açıkça vurguladığı bir tuzak: kernel stack'i çok küçüktür --
+bazı mimarilerde tek bir 4096 byte'lık sayfa kadar, ve bu stack
+\textbf{tüm kernel-alanı çağrı zincirinde paylaşılır}. Bu yüzden kernel
+kodunda \textbf{büyük yerel (otomatik/stack) değişkenler asla
+tanımlanmamalıdır} -- örneğin fonksiyon içinde \texttt{char buf[8192];}
+gibi bir tanım kernel'de ciddi bir hatadır (stack overflow riski);
+büyük veri için \texttt{kmalloc} (Bölüm 8) kullanılmalıdır.
+
+\subsection{current: \c{S}u Anki Process}
+
+\texttt{current} -- \texttt{<asm/current.h>} üzerinden erişilen, o an
+çalışan process'i temsil eden \texttt{struct task\_struct *} tipinde bir
+global işaretçi (aslında CPU başına ayrı tutulan, mimariye özel bir
+mekanizma, düz bir global değişken değil). Örnek:
+
+\begin{lstlisting}
+printk(KERN_INFO "The process is \"%s\" (pid %i)\n",
+       current->comm, current->pid);
+\end{lstlisting}
+
+\texttt{current->comm} -- çalıştıran programın adı (15 karaktere
+kırpılmış); \texttt{current->pid} -- process ID. Bunu Bölüm 6'da
+\texttt{sculluid} örneğinde (kullanıcı bazlı erişim kontrolü) tekrar
+göreceksin.
+
+\subsection{Kbuild: Kernel Modülü Neden Normal \texttt{gcc} ile Derlenmez}
+
+Modülün, derlendiği kernel ile \textbf{birebir aynı ABI'ye, aynı yapı
+hizalamalarına} sahip olması gerekir -- bu yüzden kendi başına
+\texttt{gcc dosya.c} ile derlenemez, kernel'in kendi build sistemi
+(\emph{Kbuild}) kullanılır.
+
+En basit \texttt{obj-m} kullanımı:
+\begin{lstlisting}
+obj-m := hello.o
+\end{lstlisting}
+
+Birden fazla kaynak dosyadan tek modül üretmek istersen:
+\begin{lstlisting}
+obj-m := module.o
+module-objs := file1.o file2.o
+\end{lstlisting}
+
+Gerçek çağrı, kernel ağacının makefile'ını kullanarak yapılır:
+\begin{lstlisting}
+make -C ~/kernel-2.6 M=`pwd` modules
+\end{lstlisting}
+\texttt{-C} kernel kaynak dizinine geçer (üst-düzey makefile'ı bulur);
+\texttt{M=} o makefile'a "işini bitirince modül dizinime geri dön ve
+\texttt{obj-m} listesini kullanarak \texttt{modules} hedefini derle"
+der.
+
+Kitabın önerdiği, kendini iki kez okuyan (bir kere doğrudan, bir kere
+Kbuild tarafından \texttt{KERNELRELEASE} tanımlıyken) idiyomatik
+makefile kalıbı:
+\begin{lstlisting}
+ifneq ($(KERNELRELEASE),)
+    obj-m := hello.o
+else
+    KERNELDIR ?= /lib/modules/$(shell uname -r)/build
+    PWD := $(shell pwd)
+default:
+    $(MAKE) -C $(KERNELDIR) M=$(PWD) modules
+endif
+\end{lstlisting}
+
+\begin{ahmetkutu}
+Senin \texttt{Makefile}'ın bu kalıbın basitleştirilmiş hali:
+\begin{lstlisting}
+obj-m += ahmet.o
+KDIR := /lib/modules/$(shell uname -r)/build
+PWD := $(shell pwd)
+all:
+	$(MAKE) -C $(KDIR) M=$(PWD) modules
+clean:
+	$(MAKE) -C $(KDIR) M=$(PWD) clean
+\end{lstlisting}
+\texttt{KERNELRELEASE} kontrolü olmadan, çünkü sen hep doğrudan
+komut satırından \texttt{make} çağırıyorsun -- ama sonuç birebir aynı
+mantık: derleme işi kernel ağacındaki gerçek build sistemine devredilir.
+\end{ahmetkutu}
+
+\subsection{insmod, modprobe, rmmod, lsmod -- Ger\c{c}ekte Ne Yaparlar}
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \textbf{insmod} -- modül kodunu+verisini kernel belleğine
+  yükler; bir \emph{linker} gibi davranır, modüldeki çözümlenmemiş
+  sembolleri kernel'in sembol tablosuna karşı bağlar. Disk üzerindeki
+  dosyayı değiştirmez, bellekteki bir kopya üzerinde çalışır. İçeride
+  \texttt{sys\_init\_module} sistem çağrısını tetikler: kernel
+  \texttt{vmalloc} ile bellek ayırır (Bölüm 8), modül metnini oraya
+  kopyalar, kernel sembol tablosuna karşı referansları çözer, ve
+  modülün init fonksiyonunu çağırır.
+  \item \textbf{modprobe} -- \texttt{insmod} gibi yükler, ama ek olarak
+  modülün ihtiyaç duyduğu \textbf{başka modülleri de otomatik bulup
+  yükler} (bağımlılık çözümü). Salt \texttt{insmod} kullanırsan ve
+  eksik sembol varsa, sistem log dosyasında "unresolved symbols"
+  hatası alırsın.
+  \item \textbf{rmmod} -- modülü kaldırır; modül hâlâ kullanımda
+  görünüyorsa (örn. açık bir dosya tanıtıcısı ona referans veriyorsa)
+  başarısız olur. Kitap açıkça uyarıyor: "zorla kaldırma" seçeneği
+  olsa da, o noktaya gelmişsen muhtemelen işler zaten yeterince
+  bozulmuştur -- \textbf{yeniden başlatmak daha güvenli bir yoldur.}
+  \item \textbf{lsmod} -- yüklü modülleri listeler; \texttt{/proc/modules}
+  dosyasını okuyarak çalışır (aynı bilgi \texttt{/sys/module} altında
+  da mevcuttur).
+\end{itemize}
+
+\subsection{Modül Parametreleri}
+
+Bir sürücünün sisteme özel bilgiye ihtiyacı olabilir (I/O adresi, DMA
+kanalı, bir tampon boyutu...) -- bunları derleme zamanında sabitlemek
+yerine \textbf{yükleme zamanında} (\texttt{insmod}/\texttt{modprobe}
+ile) ayarlanabilir hale getirmek için \texttt{module\_param} makrosu
+kullanılır:
+
+\begin{lstlisting}
+#include <linux/moduleparam.h>
+
+static char *whom = "world";
+static int howmany = 1;
+module_param(howmany, int, S_IRUGO);
+module_param(whom, charp, S_IRUGO);
+\end{lstlisting}
+
+\begin{lstlisting}
+insmod hellop howmany=10 whom="Mom"
+\end{lstlisting}
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \textbf{Desteklenen tipler}: \texttt{bool}, \texttt{invbool}
+  (tersine çevrilmiş boolean), \texttt{charp} (char pointer -- string),
+  \texttt{int}, \texttt{long}, \texttt{short}, ve işaretsiz
+  (\texttt{u}-önekli) karşılıkları.
+  \item \textbf{Dizi parametreleri}: \texttt{module\_param\_array(name,
+  type, num, perm)} -- \texttt{num}, kaç değer girildiğini kaydeden bir
+  \texttt{int} işaretçisi.
+  \item \textbf{\texttt{perm} (izin) argümanı} -- \texttt{<linux/stat.h>}
+  içindeki tanımları kullanır, parametrenin \texttt{/sys/module/<isim>/
+  parameters/} altındaki dosyasının izinlerini belirler:
+  \begin{itemize}
+    \item \texttt{0} $\to$ sysfs'te hiç görünmez.
+    \item \texttt{S\_IRUGO} $\to$ herkes okuyabilir, değiştirilemez.
+    \item \texttt{S\_IRUGO|S\_IWUSR} $\to$ root sysfs üzerinden
+    değiştirebilir.
+  \end{itemize}
+\end{itemize}
+
+\begin{notkutu}{Gizli tuzak: yazılabilir parametreler}
+Bir parametre sysfs üzerinden değiştirilebilir yapılırsa, modülün
+gördüğü değer gerçekten değişir -- \textbf{ama modül bu değişiklikten
+başka hiçbir şekilde haberdar edilmez} (bir callback/interrupt
+tetiklenmez). Bu yüzden bir parametreyi yazılabilir yapmadan önce,
+değişikliği algılayıp tepki verecek bir mekanizman olduğundan emin
+olmalısın -- yoksa parametreyi yazılabilir yapmamalısın.
+\end{notkutu}
+
+\begin{ahmetkutu}
+Senin \texttt{ahmet.c}'nde \texttt{\#define BUFFER\_SIZE 1024} sabit
+bir derleme-zamanı değeri. Bunu \texttt{module\_param(buffer\_size, int,
+S\_IRUGO)} ile yükleme-zamanı parametresine çevirmek, bu bölümün
+öğrettiği en doğrudan uygulanabilir tekniktir -- README'deki "sırada"
+listesine bu netlikle eklenebilir.
+\end{ahmetkutu}
+
+\subsection{Kernel Sembol Tablosu ve Mod\"ul Y\i\u{g}\i lmas\i\ (Stacking)}
+
+Bir modül başka bir modülün sembollerini kullanabilir -- buna
+\textbf{modül yığılması} denir. Gerçek örnekler: \texttt{msdos}
+dosya sistemi \texttt{fat} modülünün sembollerini kullanır; paralel
+port alt sistemi \texttt{lp} $\to$ \texttt{parport} $\to$
+\texttt{parport\_pc} şeklinde katmanlanır. Bir sembolü dışa açmak için:
+
+\begin{lstlisting}
+EXPORT_SYMBOL(isim);
+EXPORT_SYMBOL_GPL(isim);
+\end{lstlisting}
+
+İkincisi sembolü sadece GPL lisanslı modüllere açar. Çoğu modülün hiç
+sembol dışa açmasına gerek yoktur -- sadece başka modüllerin
+gerçekten faydalanacağı durumlarda kullanılır.
+
+\subsection{Hata Y\"onetimi: goto Kal\i b\i\ ve S\"okme S\i ras\i}
+
+Kayıt (registration) işlemleri başarısız olabilir (bellek yetersizliği
+gibi). Linux, hangi modülün neyi kaydettiğine dair \textbf{merkezi bir
+defter tutmaz} -- yani bir kayıt başarısız olduğunda, o ana kadar
+başarıyla yapılmış olan \emph{önceki} kayıtları geri almak (unregister)
+tamamen senin sorumluluğundadır. Kitap, iç içe \texttt{if}'lerden
+kaçınmak için normalde sevilmeyen \texttt{goto}'yu burada
+\textbf{bilinçli olarak önerir}:
+
+\begin{lstlisting}
+int __init my_init_function(void)
+{
+    int err;
+    err = register_this(ptr1, "skull");
+    if (err) goto fail_this;
+    err = register_that(ptr2, "skull");
+    if (err) goto fail_that;
+    err = register_those(ptr3, "skull");
+    if (err) goto fail_those;
+    return 0; /* basari */
+
+  fail_those: unregister_that(ptr2, "skull");
+  fail_that:  unregister_this(ptr1, "skull");
+  fail_this:  return err;
+}
+\end{lstlisting}
+
+Cleanup fonksiyonu, kayıtları \textbf{ters sırada} söker (A, B, C
+kaydedildiyse; C, B, A sökülür) -- bu, kernel programlamada genel bir
+prensiptir ve senin \texttt{ahmet\_exit}'inde de
+(\texttt{device\_destroy} $\to$ \texttt{class\_destroy} $\to$
+\texttt{cdev\_del} $\to$ \texttt{unregister\_chrdev\_region}) aynen
+uygulanmış durumda.
+
+\begin{notkutu}{İki önemli race-condition uyarısı (detayları Bölüm 5'te)}
+\begin{enumerate}[leftmargin=0.8cm]
+  \item Bir modül bir yeteneği kaydettiği \textbf{anda}, kernelin başka
+  bir parçası onu hemen kullanmaya başlayabilir -- init fonksiyonun
+  hâlâ çalışıyor olması bunu engellemez. \textbf{Kural: bir yeteneği,
+  onu desteklemek için gereken tüm iç hazırlık tamamlanmadan
+  kaydetme.}
+  \item Eğer init, bir yetenek zaten kaydedilip \emph{kullanılmaya
+  başlandıktan sonra} başarısız olursa, bu senaryoyu düşün: belki de
+  hiç başarısız olmamak (init'i bitirmek) daha güvenlidir.
+\end{enumerate}
+\end{notkutu}
+
+\subsection{Kullanıcı Alanında mı, Kernel'de mi Yazmalı? (Doing It in User Space)}
+
+Kitap, çekingen kernel programcılarına şu soruyu sorduruyor: her zaman
+kernel modülü yazmak mı gerekir?
+
+\textbf{Kullanıcı alanı sürücüsünün avantajları} (kitaptan, aynen):
+\begin{enumerate}[leftmargin=1.2cm]
+  \item Tam C kütüphanesi kullanılabilir.
+  \item Normal bir debugger (gdb) rahatça kullanılabilir.
+  \item Sürücü kilitlenirse sadece o process öldürülür, sistem
+  genelde etkilenmez.
+  \item Kullanıcı belleği \emph{swap edilebilir} -- kernel belleği
+  edilemez; nadiren kullanılan büyük bir sürücü sürekli RAM işgal
+  etmez.
+  \item Kapalı kaynaklı sürücüler için lisans belirsizliği ortadan
+  kalkar.
+\end{enumerate}
+
+\textbf{Dezavantajları}:
+\begin{enumerate}[leftmargin=1.2cm]
+  \item Kesmeler (interrupt) user space'te mevcut değildir.
+  \item Doğrudan bellek erişimi sadece \texttt{/dev/mem}'i
+  \texttt{mmap} ederek mümkün, ve bunu sadece yetkili kullanıcı
+  yapabilir.
+  \item I/O port erişimi kısıtlı ve/veya yavaş.
+  \item Yanıt süresi daha yavaştır (context switch gerekir); sürücü
+  disk'e swap edilmişse çok daha kötüleşir.
+  \item \textbf{En önemli cihaz sınıfları user space'te hiç
+  yapılamaz}: ağ arayüzleri ve blok cihazlar bunlara dahildir.
+\end{enumerate}
+
+Kitabın tavsiyesi: yeni/alışılmadık bir donanımı ilk öğrenirken user
+space'te denemek, tüm sistemi riske atmadan deney yapmayı sağlar --
+donanım anlaşıldıktan sonra "yazılımı bir kernel modülüne kapsüllemek
+sıkıntısız bir işlem olmalı."
+
+\subsection*{B\"ol\"um 2 -- H\i zl\i\ Referans (kitab\i n kendi \"ozeti)}
+\begin{itemize}[leftmargin=1.2cm]
+  \item \texttt{insmod}, \texttt{modprobe}, \texttt{rmmod} -- modül
+  yükleme/kaldırma araçları.
+  \item \texttt{module\_init(f)}, \texttt{module\_exit(f)} -- init/exit
+  fonksiyonlarını bildiren makrolar.
+  \item \texttt{\_\_init}, \texttt{\_\_initdata}, \texttt{\_\_exit},
+  \texttt{\_\_exitdata} -- yalnızca init/exit zamanında kullanılan
+  fonksiyon/veri işaretleri; bellekten atılabilirler (özel bir ELF
+  bölümüne yerleştirilerek).
+  \item \texttt{struct task\_struct *current;} -- şu anki process.
+  \item \texttt{obj-m} -- Kbuild'e hangi modüllerin derleneceğini
+  söyleyen makefile sembolü.
+  \item \texttt{/sys/module}, \texttt{/proc/modules} -- yüklü modüller
+  hakkında bilgi.
+  \item \texttt{EXPORT\_SYMBOL(sym)}, \texttt{EXPORT\_SYMBOL\_GPL(sym)}
+  -- bir sembolü kernel'e (veya sadece GPL modüllere) açar.
+  \item \texttt{module\_param(degisken, tip, izin)} -- yükleme-zamanı
+  ayarlanabilir bir parametre tanımlar.
+  \item \texttt{int printk(const char *fmt, ...);} -- kernelin
+  \texttt{printf} karşılığı.
+\end{itemize}
+
+\newpage
+
+%=================================================================
+\section{Karakter S\"ur\"uc\"uler}
+\label{sec:bolum3}
+%=================================================================
+
+Bu bölüm kitabın en yoğun kod içeren bölümlerinden biridir çünkü artık
+gerçek bir sürücü (\texttt{scull}) baştan sona inşa edilir. Senin
+\texttt{ahmet.c}'n bu bölümün kavramlarının basitleştirilmiş bir
+uygulamasıdır -- burada scull'un tam mimarisini görüp kendi kodunla
+karşılaştıracaksın.
+
+\subsection{scull'un Tasar\i m\i : Neden Birden Fazla ``Ki\c{s}ilik''?}
+
+\texttt{scull} = \emph{Simple Character Utility for Loading Localities}.
+Gerçek donanıma değil, kernel belleğinden ayrılmış bir alana çalışır --
+bu yüzden taşınabilir, herkes derleyip çalıştırabilir. Kitap tek bir
+mekanizma üzerine \textbf{altı farklı ``kişilik''} inşa eder, her biri
+gerçek dünyadaki bir erişim politikasını örnekler:
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \textbf{scull0--scull3}: dört cihaz, her biri hem
+  \emph{global} (aynı dosyayı açan tüm süreçler aynı veriyi paylaşır --
+  senin \texttt{ahmet}'inin de yaptığı gibi) hem \emph{kalıcı} (veri
+  kapat/aç arasında kaybolmaz, sadece açık truncate ile silinir).
+  \item \textbf{scullpipe0--3}: FIFO/boru gibi davranan dört cihaz --
+  Bölüm 6'da bloklayan I/O örneği için kullanılır.
+  \item \textbf{scullsingle}: scull0 gibi ama \textbf{aynı anda sadece
+  bir process} açabilir.
+  \item \textbf{scullpriv}: her sanal konsol/terminale \textbf{özel}
+  bir bellek alanı.
+  \item \textbf{sculluid}: aynı anda sadece \textbf{bir kullanıcı}
+  (UID) açabilir; ikinci kullanıcı hata alır.
+  \item \textbf{scullwuid}: sculluid gibi ama hata vermek yerine
+  \textbf{bekler} (bloklar).
+\end{itemize}
+
+Kitabın kendi ifadesiyle: bu erişim-kontrollü varyantlar "mekanizma ile
+politikayı karıştırıyormuş gibi görünebilir, ama gerçek hayattaki bazı
+cihazlar tam olarak bu tür yönetim gerektirir." Bu bölüm sadece
+scull0--3'ün iç yapısını kapsar; scullpipe ve erişim-kontrollü
+varyantlar Bölüm 6'da.
+
+\subsection{Major/Minor Numaralar\i n\i n \.{I}\c{c} Temsili}
+
+\texttt{dev\_t} tipi (\texttt{<linux/types.h>}), major ve minor'u tek
+bir sayıda taşır. 2.6.0'dan itibaren: 32 bit, \textbf{12 bit major, 20
+bit minor}. Bu düzene asla doğrudan (bit kaydırma ile) güvenme --
+her zaman şu makroları kullan (\texttt{<linux/kdev\_t.h>}):
+
+\begin{lstlisting}
+MAJOR(dev_t dev);        /* major'u cikar */
+MINOR(dev_t dev);        /* minor'u cikar */
+MKDEV(int major, int minor);  /* ikisinden dev_t olustur */
+\end{lstlisting}
+
+Kitap açıkça uyarıyor: \texttt{dev\_t}'nin iç yapısı gelecekte tekrar
+değişebilir -- taşınabilir kod bu makrolarla yazılmalı, ham bit
+işlemleriyle değil.
+
+\subsection{Cihaz Numaras\i\ Ay\i rma: \texttt{register\_chrdev\_region} vs \texttt{alloc\_chrdev\_region}}
+
+\begin{lstlisting}
+int register_chrdev_region(dev_t first, unsigned int count, char *name);
+int alloc_chrdev_region(dev_t *dev, unsigned int firstminor,
+                         unsigned int count, char *name);
+void unregister_chrdev_region(dev_t first, unsigned int count);
+\end{lstlisting}
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \texttt{register\_chrdev\_region}: major numarasını \textbf{sen
+  zaten biliyorsan} kullanılır (\texttt{first} parametresiyle).
+  \item \texttt{alloc\_chrdev\_region}: \texttt{dev} bir \textbf{çıktı}
+  parametresidir -- kernel dinamik olarak bir major seçer ve sonucu
+  oraya yazar. Kitap açıkça şöyle diyor: \textbf{"yeni sürücülerin
+  neredeyse kesinlikle \texttt{alloc\_chrdev\_region} kullanması
+  gerekir"} -- rastgele boş bir major seçmek "sadece sürücünün tek
+  kullanıcısı sen olduğun sürece işe yarar," sürücü yaygınlaştıkça
+  çakışma riski artar.
+\end{itemize}
+
+\begin{notkutu}{Dinamik atamanın bedeli}
+Major dinamik olduğu için \texttt{/dev} düğümlerini önceden
+oluşturamazsın -- yükledikten sonra \texttt{/proc/devices}'ten atanan
+major'u okuyup (genelde bir yükleme betiğinde \texttt{awk} ile) ona
+göre \texttt{mknod} yapman gerekir. \textbf{Ama senin \texttt{ahmet.c}'in
+bu problemi tamamen ortadan kaldırıyor} -- çünkü Bölüm 14'teki Linux
+Device Model'i (\texttt{class\_create}/\texttt{device\_create})
+kullanıyorsun; udev major'u otomatik öğrenip \texttt{/dev/ahmet}'i
+kendisi oluşturuyor. Kitabın scull'u bu kolaylığı henüz kullanmıyor
+(scull, Bölüm 3'te yazıldığı haliyle, elle \texttt{mknod} betikleriyle
+çalışır) -- senin sürücün bu noktada scull'dan daha modern.
+\end{notkutu}
+
+\subsection{\"U\c{c} Temel Veri Yap\i s\i: file\_operations, file, inode}
+
+\subsubsection{struct file\_operations}
+
+Cihaz numaralarını sürücü koduna bağlayan tablo. Her açık dosyanın
+\texttt{f\_op} alanı kendi \texttt{file\_operations}'ına işaret eder.
+\texttt{\_\_user} etiketi (örn. \texttt{char \_\_user *buf}) bir
+işaretçinin \textbf{user-space adresi} olduğunu, kernel kodunun onu
+doğrudan dereference edemeyeceğini belgeler (statik analiz araçları
+için, derleyici için etkisi yoktur).
+
+En çok kullanılan alanlar (NULL bırakılırsa ne olduğuyla birlikte):
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \texttt{owner} -- işlem değil, \texttt{THIS\_MODULE} olmalı;
+  kullanımdayken modülün kaldırılmasını engeller.
+  \item \texttt{read}/\texttt{write} -- NULL ise syscall
+  \texttt{-EINVAL} döner.
+  \item \texttt{ioctl} -- NULL ise öntanımlı olmayan her ioctl
+  \texttt{-ENOTTY} döner.
+  \item \texttt{open} -- NULL ise açma her zaman başarılı olur ama
+  sürücü haberdar edilmez.
+  \item \texttt{release} -- NULL olabilir; \textbf{her \texttt{close()}
+  çağrısında değil}, sadece \texttt{file} yapısı gerçekten yok
+  edildiğinde çağrılır (aşağıda detaylı).
+  \item \texttt{llseek} -- NULL ise kernel \texttt{f\_pos}'u kendi
+  varsayılan mantığıyla değiştirir (Bölüm 6'da detaylı).
+  \item \texttt{mmap}, \texttt{poll}, \texttt{fasync}, \texttt{fsync}
+  -- ileri düzey; sırasıyla Bölüm 15 ve Bölüm 6'da.
+\end{itemize}
+
+scull'un gerçek tanımı, C99 adlandırılmış alan (designated initializer)
+söz dizimiyle:
+\begin{lstlisting}
+struct file_operations scull_fops = {
+    .owner =   THIS_MODULE,
+    .llseek =  scull_llseek,
+    .read =    scull_read,
+    .write =   scull_write,
+    .ioctl =   scull_ioctl,
+    .open =    scull_open,
+    .release = scull_release,
+};
+\end{lstlisting}
+Bu söz dizimi tercih edilir çünkü: (1) struct'ın alan sırası değişse
+bile kod kırılmaz, (2) belirtilmeyen alanlar otomatik NULL olur, (3)
+sık erişilen işaretçiler aynı cache satırına yerleştirilebilir.
+
+\subsubsection{struct file: f\_pos, f\_flags, private\_data}
+
+\texttt{struct file} \textbf{açık bir dosyayı} temsil eder -- C
+kütüphanesindeki \texttt{FILE*} ile \textbf{karıştırılmamalı}, ikisi
+birbirinden tamamen bağımsızdır. Sürücü yazarları için önemli alanlar:
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \texttt{f\_pos} (\texttt{loff\_t}, 64-bit) -- güncel okuma/yazma
+  konumu. Sürücü bunu \textbf{okuyabilir} ama normalde
+  \textbf{doğrudan yazmamalı} -- konum güncellemesi \texttt{read}/
+  \texttt{write}'a geçirilen \texttt{*offp} işaretçisi üzerinden
+  yapılmalı (istisna: \texttt{llseek}'in tüm işi zaten konum
+  değiştirmektir).
+  \item \texttt{f\_flags} -- \texttt{O\_RDONLY}, \texttt{O\_NONBLOCK},
+  \texttt{O\_SYNC} gibi bayraklar. \textbf{Okuma/yazma izni kontrolü
+  için \texttt{f\_mode} kullanılmalı, \texttt{f\_flags} değil.}
+  \item \texttt{f\_op} -- kernel tarafından \texttt{open} sırasında
+  atanır. \textbf{Kernel bu değeri başka hiçbir yerde önbelleğe
+  almaz} -- yani bir sürücü kendi \texttt{open}'ı içinde
+  \texttt{filp->f\_op}'u \textbf{farklı bir \texttt{file\_operations}
+  tablosuna değiştirebilir}, ve bu değişiklik o dosya tanıtıcısındaki
+  sonraki tüm çağrılarda geçerli olur ("method overriding" -- kernelin
+  nesne-yönelimli hilesi). \texttt{/dev/null} ve \texttt{/dev/zero}
+  (ikisi de major 1) aynı major altında farklı davranışlar sunmak için
+  bunu kullanır.
+  \item \texttt{private\_data} -- \texttt{open} syscall'ı tarafından
+  \texttt{NULL}'a ayarlanır, sürücü serbestçe kullanabilir. \textbf{Bu
+  senin \texttt{ahmet.c}'nin şu an kullanmadığı ama scull'un aktif
+  kullandığı alan} -- scull, \texttt{open} içinde kendi
+  \texttt{scull\_dev} yapısına işaretçiyi buraya koyar, böylece
+  \texttt{read}/\texttt{write} her seferinde hangi cihaz örneğiyle
+  uğraştığını bilir.
+\end{itemize}
+
+\begin{notkutu}{release vs. flush: gizli bir tuzak}
+\texttt{release}, her \texttt{close()} çağrısında \textbf{çağrılmaz}.
+\texttt{fork()} ve \texttt{dup()}, \emph{aynı} \texttt{file} yapısına
+işaret eden yeni dosya tanıtıcı \textbf{kopyaları} oluşturur --
+\texttt{open()} çağırmazlar. Kernel, \texttt{file} yapısı üzerinde bir
+\textbf{kullanım sayacı} tutar; \texttt{close()} sadece bu sayaç
+\textbf{sıfıra düştüğünde} \texttt{release}'i çağırır -- yani her
+\texttt{open} için tam olarak bir \texttt{release} garanti edilir.
+Buna karşılık \texttt{flush}, uygulama her \texttt{close} çağırdığında
+(her fd kopyası için) tetiklenir -- ama çoğu sürücü bunu
+uygulamaz çünkü genelde \texttt{close} anında (asıl \texttt{release}
+olmadıkça) yapılacak bir şey yoktur.
+\end{notkutu}
+
+\subsection{cdev: Sürücüyü Kernel'e Tanıtmak}
+
+\begin{lstlisting}
+void cdev_init(struct cdev *cdev, struct file_operations *fops);
+int  cdev_add(struct cdev *dev, dev_t num, unsigned int count);
+void cdev_del(struct cdev *dev);
+\end{lstlisting}
+
+İki kullanım yolu: (1) \texttt{cdev\_alloc()} ile bağımsız tahsis, ya
+da (2) \textbf{scull'un yaptığı gibi} \texttt{cdev}'i kendi cihaz
+struct'ının \textbf{içine gömmek}:
+
+\begin{lstlisting}
+struct scull_dev {
+    struct scull_qset *data;  /* ilk quantum set'e isaretci */
+    int quantum;              /* guncel quantum boyutu */
+    int qset;                 /* guncel dizi boyutu */
+    unsigned long size;       /* burada saklanan veri miktari */
+    unsigned int access_key;  /* sculluid/scullpriv icin */
+    struct semaphore sem;     /* karsilikli dislama semaforu */
+    struct cdev cdev;         /* Char device yapisi */
+};
+\end{lstlisting}
+
+\begin{ahmetkutu}
+Senin kodunda \texttt{static struct cdev ahmet\_cdev;} ayrı, bağımsız
+bir global değişken -- scull'un gömme (embedding) desenini
+\textbf{kullanmıyorsun}. Bu, tek cihazlı basit bir sürücü için
+tamamen makul bir sadeleştirme. Eğer ileride birden fazla \texttt{ahmet}
+cihazı (minor 0, 1, 2...) desteklemek istersen, scull'un yaptığı gibi
+\texttt{cdev}'i kendi struct'ının içine gömüp bir dizi/liste
+oluşturman gerekecek -- tam olarak bu bölümün öğrettiği desen.
+\end{ahmetkutu}
+
+\textbf{Kritik sıralama kuralı}: \texttt{cdev\_add()} döndüğü anda
+cihaz "canlıdır" -- kernel operasyonlarını \textbf{hemen} çağırabilir.
+Bu yüzden \texttt{cdev\_add}, sürücü tamamen hazır olmadan
+\textbf{asla} çağrılmamalı.
+
+\subsubsection{container\_of: inode'dan kendi struct'\i na geri d\"onmek}
+
+scull'un \texttt{open}'ı, \texttt{inode->i\_cdev} üzerinden embed
+edilmiş \texttt{cdev}'e erişebilir -- ama asıl istenen \emph{onu içeren}
+\texttt{scull\_dev}'dir. Çözüm, \texttt{<linux/kernel.h>}'deki genel
+amaçlı bir makro:
+
+\begin{lstlisting}
+container_of(pointer, container_type, container_field);
+\end{lstlisting}
+
+\begin{lstlisting}
+int scull_open(struct inode *inode, struct file *filp)
+{
+    struct scull_dev *dev;
+    dev = container_of(inode->i_cdev, struct scull_dev, cdev);
+    filp->private_data = dev; /* diger metodlar icin */
+
+    if ( (filp->f_flags & O_ACCMODE) == O_WRONLY) {
+        scull_trim(dev); /* hatalari yoksay */
+    }
+    return 0;
+}
+\end{lstlisting}
+
+\texttt{O\_ACCMODE} maskesi: \texttt{O\_WRONLY}/\texttt{O\_RDONLY}/
+\texttt{O\_RDWR} bayrakları temiz bir bit maskesi oluşturmadığı için,
+sadece erişim-modu bitlerini izole etmek amacıyla kullanılır. scull'un
+\texttt{open}'ının tek gerçek işi budur: dosya \emph{sadece yazmak
+için} açılmışsa cihazı sıfıra kısaltmak (normal dosyaların
+\texttt{O\_APPEND} olmadan yazma-açılışında truncate edilmesiyle aynı
+mantık).
+
+\subsection{scull'un Bellek Y\"onetimi: Quantum ve Qset}
+
+Bu bölüm zorunlu bir sürücü tekniği değil, \textbf{bir tasarım kararının}
+gösterimidir: scull cihaz boyutunu bilerek sınırlamaz (felsefi olarak
+keyfi sınır kötüdür; pratikte de düşük bellekli test için tüm RAM'i
+tüketebilmek faydalıdır -- \texttt{cp /dev/zero /dev/scull0}).
+
+\textbf{Veri yapısı}: her scull cihazı bir \textbf{bağlı liste}dir,
+listenin her düğümü bir \texttt{scull\_qset} yapısına işaret eder:
+
+\begin{lstlisting}
+struct scull_qset {
+    void **data;             /* pointer dizisi */
+    struct scull_qset *next; /* bir sonraki dugum */
+};
+\end{lstlisting}
+
+Terminoloji: bir işaretçinin gösterdiği bellek alanına \textbf{quantum}
+denir; işaretçi dizisinin kendisine (ya da uzunluğuna)
+\textbf{quantum set (qset)} denir. Öntanımlı olarak dizi 1000
+işaretçi, her quantum 4000 byte'tır -- yani bir düğüm 4 milyon byte'a
+kadar veri adresleyebilir.
+
+\begin{notkutu}{Bellek fazlalığı örneği (kitaptan aynen)}
+scull'a tek bir byte yazmak, o baytı tutmak için 4000 byte'lık bir
+quantum \textbf{ve} 4000 (32-bit) ya da 8000 (64-bit) byte'lık bir
+qset dizisi ayırır -- yani toplam 8000--12000 byte harcanır! Büyük
+yazmalarda bu fazlalık önemsizdir (her 4 MB veri için sadece bir
+liste elemanı). Quantum/qset boyutu \textbf{politika} meselesidir,
+sürücüde sabit kodlanmamalı -- üç seviyede ayarlanabilir: derleme
+zamanı (\texttt{scull.h}'deki makrolar), yükleme zamanı (modül
+parametreleri), çalışma zamanı (ioctl, Bölüm 6).
+\end{notkutu}
+
+\texttt{scull\_trim()} tüm cihazın belleğini serbest bırakır (hem
+\texttt{scull\_open}'ın \texttt{O\_WRONLY} truncate'inde, hem modül
+kaldırılırken çağrılır):
+
+\begin{lstlisting}
+int scull_trim(struct scull_dev *dev)
+{
+    struct scull_qset *next, *dptr;
+    int qset = dev->qset;
+    int i;
+    for (dptr = dev->data; dptr; dptr = next) {
+        if (dptr->data) {
+            for (i = 0; i < qset; i++)
+                kfree(dptr->data[i]);
+            kfree(dptr->data);
+            dptr->data = NULL;
+        }
+        next = dptr->next;
+        kfree(dptr);
+    }
+    dev->size = 0;
+    dev->quantum = scull_quantum;
+    dev->qset = scull_qset;
+    dev->data = NULL;
+    return 0;
+}
+\end{lstlisting}
+
+Bu fonksiyon listeyi baştan sona gezer; her düğümde önce her bir
+quantum'u, sonra dizinin kendisini, sonra düğümün kendisini serbest
+bırakır (sırayla -- \texttt{next}'i düğümü silmeden önce kaydederek).
+
+\subsection{read ve write: Tam Algoritmik Detay}
+
+İmzalar:
+\begin{lstlisting}
+ssize_t read(struct file *filp, char __user *buff,
+             size_t count, loff_t *offp);
+ssize_t write(struct file *filp, const char __user *buff,
+              size_t count, loff_t *offp);
+\end{lstlisting}
+
+\subsubsection{Neden buff'a doğrudan dokunulamaz? (3 gerekçe, kitaptan)}
+\begin{enumerate}[leftmargin=1.2cm]
+  \item Mimariye ve kernel ayarlarına bağlı olarak, user-space
+  işaretçisi kernel modunda çalışırken \textbf{hiç geçerli
+  olmayabilir}.
+  \item Kullanıcı belleği \textbf{swap edilebilir} -- işaretçiye
+  doğrudan dokunmak beklenmedik bir page fault tetikleyebilir; kernel
+  kodu bunu doğrudan yaşayamaz (bir "oops" ile process ölür).
+  \item \textbf{Güvenlik}: işaretçi kullanıcı tarafından verilir,
+  hatalı ya da kötü niyetli olabilir. Körlemesine dereference etmek
+  "bir user-space programının sistemin herhangi bir yerindeki belleğe
+  erişmesine/üzerine yazmasına açık bir kapı" olur.
+\end{enumerate}
+
+Bu yüzden \texttt{<asm/uaccess.h>}'deki özel, mimariye-güvenli
+fonksiyonlar zorunludur -- senin zaten kullandığın
+\texttt{copy\_to\_user}/\texttt{copy\_from\_user}.
+
+\begin{notkutu}{Kritik gotcha: dönüş değeri "kalan" byte sayısıdır}
+\texttt{copy\_to\_user}/\texttt{copy\_from\_user}'ın dönüş değeri,
+\textbf{kopyalanan} byte sayısı değil, \textbf{kopyalanamayan (kalan)}
+byte sayısıdır! İşaretçi tamamen geçersizse hiç kopyalama yapılmaz;
+kısmen geçersizse (örn. haritalanmamış bir sayfaya denk gelirse)
+sadece bir kısmı kopyalanır -- her iki durumda da dönüş değeri "kalan"
+miktardır. \textbf{scull'un kuralı}: dönüş değeri sıfır değilse
+\texttt{-EFAULT} dön. Senin \texttt{ahmet.c}'in de bu kuralı doğru
+uyguluyor: \texttt{if (copy\_from\_user(...)) return -EFAULT;} --
+burada \texttt{if} zaten "sıfırdan farklıysa" anlamına geliyor,
+doğru kullanım bu.
+
+Ayrıca: \texttt{\_\_copy\_to\_user}/\texttt{\_\_copy\_from\_user}
+(çift alt çizgili versiyonlar) adres geçerlilik kontrolünü
+\textbf{atlar} -- sadece işaretçiyi önceden \texttt{access\_ok} ile
+doğruladıysan kullanılmalı; doğrulama olmadan kullanmak kernel çökmesi
+veya güvenlik açığına yol açabilir.
+\end{notkutu}
+
+\subsubsection{ssize\_t dönüş değeri sözleşmesi (hem read hem write için)}
+\begin{itemize}[leftmargin=1.2cm]
+  \item \textbf{Negatif} = hata (\texttt{<linux/errno.h>}'deki
+  kodlardan biri).
+  \item \textbf{\texttt{count}'a eşit} = istenen tüm veri aktarıldı
+  (ideal durum).
+  \item \textbf{Pozitif ama \texttt{count}'tan az} = kısmi aktarım;
+  çağıran (örn. \texttt{fread}) kalanı almak için tekrar çağırmalı.
+  \item \textbf{Sıfır}: \texttt{read} için = EOF (dosya sonu).
+  \texttt{write} için = hiçbir şey yazılmadı ama bu \textbf{hata
+  değildir} (bloklayan yazmanın tam anlamı Bölüm 6'da).
+\end{itemize}
+
+\begin{notkutu}{Gecikmeli hata bildirimi kuralı}
+Eğer bir kısım veri başarıyla aktarılıp \textbf{sonra} hata oluşursa,
+kural şudur: dönüş değeri başarıyla aktarılan byte sayısı olmalı, ve
+\textbf{hata bir sonraki çağrıya kadar bildirilmemelidir} -- yani
+sürücü bekleyen hata durumunu içeride hatırlamak zorundadır.
+\end{notkutu}
+
+scull'un tam \texttt{read} kodu (semafor çağrıları Bölüm 5'e kadar
+"görmezden gel" diyerek tanıtılıyor):
+
+\begin{lstlisting}
+ssize_t scull_read(struct file *filp, char __user *buf, size_t count,
+                loff_t *f_pos)
+{
+    struct scull_dev *dev = filp->private_data;
+    struct scull_qset *dptr;
+    int quantum = dev->quantum, qset = dev->qset;
+    int itemsize = quantum * qset;
+    int item, s_pos, q_pos, rest;
+    ssize_t retval = 0;
+
+    if (down_interruptible(&dev->sem))
+        return -ERESTARTSYS;
+    if (*f_pos >= dev->size)
+        goto out;
+    if (*f_pos + count > dev->size)
+        count = dev->size - *f_pos;
+
+    item = (long)*f_pos / itemsize;
+    rest = (long)*f_pos % itemsize;
+    s_pos = rest / quantum; q_pos = rest % quantum;
+
+    dptr = scull_follow(dev, item);
+    if (dptr == NULL || !dptr->data || ! dptr->data[s_pos])
+        goto out; /* bosluklari doldurma */
+
+    if (count > quantum - q_pos)
+        count = quantum - q_pos;
+
+    if (copy_to_user(buf, dptr->data[s_pos] + q_pos, count)) {
+        retval = -EFAULT;
+        goto out;
+    }
+    *f_pos += count;
+    retval = count;
+
+  out:
+    up(&dev->sem);
+    return retval;
+}
+\end{lstlisting}
+
+Algoritma adım adım: önce \texttt{count}, \texttt{*f\_pos + count}
+cihaz boyutunu aşmasın diye kırpılır (EOF'un ötesine okuma yok).
+Sonra \texttt{item}/\texttt{s\_pos}/\texttt{q\_pos} -- tam sayı
+bölme/mod ile -- \texttt{*f\_pos}'un hangi liste düğümüne, hangi
+qset dizisi konumuna, hangi quantum-içi byte ofsetine denk geldiğini
+hesaplar. \texttt{scull\_follow} listeyi gezip doğru düğümü bulur
+(yoksa \texttt{NULL} döner -- "boşlukları doldurma" kuralı: eksik veri
+hata değil, EOF gibi davranılır). \texttt{count} bu kez \emph{tek bir
+quantum}ı aşmayacak şekilde tekrar kırpılır -- \textbf{scull'un
+\texttt{read}'i bir çağrıda sadece tek bir quantum işler}, daha
+fazlası isteniyorsa çağıran tekrar çağırır (stdio bunu fark etmez
+bile).
+
+\texttt{write} mantığı büyük ölçüde simetriktir, ama önemli bir
+farkla: \texttt{read} "boşluk" bulursa EOF gibi davranıp durur, ama
+\texttt{write} eksik olan \texttt{data} dizisini ve quantum'u
+\textbf{talep üzerine (on-demand) \texttt{kmalloc} ile ayırır} --
+cihaz büyüyebilir. Son olarak \texttt{dev->size}, yeni
+\texttt{*f\_pos} eskisini aşıyorsa güncellenir.
+
+\begin{ahmetkutu}
+Senin \texttt{ahmet\_write}'ın \texttt{*offset}'i hiç kullanmıyor --
+her yazma tüm tamponu (\texttt{buffer\_size} dahil) baştan
+değiştiriyor. scull'un \texttt{write}'ı ise \texttt{*f\_pos}'u tam
+olarak \texttt{read} ile aynı mantıkla kullanıyor: dosyanın
+\textbf{neresine} yazıldığını hesaba katıyor. Bu, README'de zaten not
+edilen eksikliğin kitaptaki "doğru" referans uygulamasıdır --
+\texttt{scull\_write}'ı adım adım takip ederek kendi
+\texttt{ahmet\_write}'ını \texttt{*offset} kullanacak şekilde
+güncelleyebilirsin.
+\end{ahmetkutu}
+
+\subsection{scull ile Oynamak: strace \"Onerisi}
+
+Kitap, \texttt{cp}, \texttt{dd}, yönlendirme ile test etmeyi, ve
+özellikle \texttt{strace} kullanmayı önerir -- örneğin
+\texttt{strace ls /dev > /dev/scull0} çalıştırırsan, \texttt{write}
+çağrısının 4096 byte istediğini ama scull'un quantum sınırı yüzünden
+4088 byte kabul edip kalanı için tekrar çağrıldığını görürsün. Bu
+teknik Bölüm 4'te derinlemesine işlenir.
+
+\subsection*{B\"ol\"um 3 -- H\i zl\i\ Referans}
+\begin{itemize}[leftmargin=1.2cm]
+  \item \texttt{dev\_t}, \texttt{MAJOR()}, \texttt{MINOR()},
+  \texttt{MKDEV()} -- \texttt{<linux/types.h>}.
+  \item \texttt{register\_chrdev\_region()}, \texttt{alloc\_chrdev\_region()},
+  \texttt{unregister\_chrdev\_region()} -- \texttt{<linux/fs.h>}.
+  \item \texttt{struct file\_operations}, \texttt{struct file},
+  \texttt{struct inode} -- üç temel yapı.
+  \item \texttt{cdev\_alloc()}, \texttt{cdev\_init()}, \texttt{cdev\_add()},
+  \texttt{cdev\_del()} -- \texttt{<linux/cdev.h>}.
+  \item \texttt{container\_of(ptr, tip, alan)} -- \texttt{<linux/kernel.h>}.
+  \item \texttt{copy\_from\_user()}, \texttt{copy\_to\_user()} --
+  \texttt{<asm/uaccess.h>}.
+\end{itemize}
+
+\newpage
+
+%=================================================================
+\section{Hata Ay\i klama Teknikleri}
+\label{sec:bolum4}
+%=================================================================
+
+Kernel'de hata ayıklamak user space'ten yapısal olarak farklıdır: kod
+tek bir process'e bağlı değildir, hatalı kod tüm sistemi çökertebilir,
+ve çökme "kanıtı" genelde kaybolur. Bu bölüm, sırasıyla \emph{yazdırarak},
+\emph{sorgulayarak}, \emph{izleyerek} ve son çare olarak
+\emph{interaktif debugger ile} hata ayıklamayı ele alır.
+
+\subsection{printk: Log Seviyeleri}
+
+\texttt{printk}'in \texttt{printf}'ten temel farkı: format string'in
+başına bir \textbf{öncelik (loglevel)} dizgesi eklenebilir. Sekiz
+seviye vardır (\texttt{<linux/kernel.h>}), \textbf{azalan önem
+sırasıyla}:
+
+\begin{center}
+\begin{tabular}{ll}
+\texttt{KERN\_EMERG} & sistem kullanılamaz duruma gelmeden hemen önce \\
+\texttt{KERN\_ALERT} & derhal müdahale gerektiren durum \\
+\texttt{KERN\_CRIT} & kritik durumlar, ciddi donanım/yazılım hatası \\
+\texttt{KERN\_ERR} & hata durumu (sürücüler donanım sorunları için kullanır) \\
+\texttt{KERN\_WARNING} & ciddi olmayan ama sorunlu durumlar \\
+\texttt{KERN\_NOTICE} & normal ama dikkate değer durumlar \\
+\texttt{KERN\_INFO} & bilgilendirme (örn. açılışta bulunan donanım) \\
+\texttt{KERN\_DEBUG} & hata ayıklama mesajları \\
+\end{tabular}
+\end{center}
+
+Loglevel belirtilmezse öntanımlı \texttt{KERN\_WARNING} kullanılır.
+Mesaj, kendi öncelik sayısı \texttt{console\_loglevel} değişkeninden
+\textbf{küçükse} konsola da basılır; \texttt{klogd}/\texttt{syslogd}
+çalışıyorsa mesaj bağımsız olarak \texttt{/var/log/messages}'a da
+yazılır. \texttt{console\_loglevel} değiştirme yöntemleri:
+\texttt{klogd -c <seviye>}, ya da doğrudan
+\texttt{/proc/sys/kernel/printk} dosyasına yazmak (\texttt{echo 8 >
+/proc/sys/kernel/printk} $\to$ debug dahil her şeyi konsola bas).
+
+\begin{ahmetkutu}
+Senin \texttt{ahmet.c}'in her yerde \texttt{pr\_info} kullanıyor --
+bu, \texttt{printk(KERN\_INFO ...)} için kısayol bir makrodur (aynı
+aile: \texttt{pr\_err}, \texttt{pr\_warn}, \texttt{pr\_debug}...).
+\texttt{dmesg} ile gördüğün çıktı tam olarak bu mekanizmanın
+sonucudur.
+\end{ahmetkutu}
+
+\subsubsection{printk nas\i l saklan\i r: dairesel tampon (circular buffer)}
+
+\texttt{printk}, verisini sabit boyutlu bir \textbf{dairesel tampona}
+yazar (\texttt{\_\_LOG\_BUF\_LEN}, 4KB--1MB arası, derleme zamanı
+seçimi). Tampon dolarsa \textbf{en eski veri üzerine yazılır} --
+bilinçli bir tercih: bu sayede bir loglama süreci (process) olmadan
+da sistem çalışabilir, bellek de israf edilmez. \texttt{dmesg} bu
+tamponu \textbf{tüketmeden} (okuyup silmeden) dump eder; klogd'un
+kullandığı \texttt{/proc/kmsg} okuması ise tamponu tüketir (FIFO
+gibi davranır -- ikinci bir okuyucu varsa çakışma olur).
+
+\subsubsection{printk\_ratelimit: log ta\c{s}mas\i n\i\ \"onlemek}
+
+Dikkatsiz \texttt{printk} kullanımı binlerce mesaj üretip konsolu
+boğabilir; \textbf{yavaş konsol cihazlarında} (örn. seri port) sistemi
+\textbf{yavaşlatabilir hatta kilitleyebilir} (kesme kullanılamayan bir
+seri konsolu sürmek için). \textbf{Kural: üretim kodu normal
+çalışmada asla yazdırmamalı, sadece istisnai durumlarda.} Tekrarlayan
+hata durumları için kernel bir hız sınırlayıcı sağlar:
+
+\begin{lstlisting}
+if (printk_ratelimit())
+    printk(KERN_NOTICE "The printer is still on fire\n");
+\end{lstlisting}
+
+Ayarlanabilir eşikler: \texttt{/proc/sys/kernel/printk\_ratelimit}
+(saniye), \texttt{/proc/sys/kernel/printk\_ratelimit\_burst} (eşiğe
+kadar kabul edilen mesaj sayısı).
+
+\subsection{Ko\c{s}ullu Debug Mesajlar\i : PDEBUG Kal\i b\i}
+
+Kitabın scull kaynağında kullandığı, derleme-zamanı açılıp
+kapanabilen debug makrosu:
+
+\begin{lstlisting}
+#undef PDEBUG
+#ifdef SCULL_DEBUG
+#  ifdef __KERNEL__
+#    define PDEBUG(fmt, args...) printk( KERN_DEBUG "scull: " fmt, ## args)
+#  else
+#    define PDEBUG(fmt, args...) fprintf(stderr, fmt, ## args)
+#  endif
+#else
+#  define PDEBUG(fmt, args...) /* debug yok: hicbir sey */
+#endif
+\end{lstlisting}
+
+Bu, gcc'nin değişken-argümanlı makro genişletmesini kullanır. Kernel
+alanında \texttt{printk}, kullanıcı alanında (aynı kodu test programı
+olarak derlersen) \texttt{fprintf(stderr,...)} olur -- \textbf{aynı
+debug makrosu iki dünyada da çalışır}. Makefile'da
+\texttt{-DSCULL\_DEBUG} bayrağıyla açılır/kapanır -- yani debug
+mesajlarını değiştirmek \textbf{yeniden derleme} gerektirir (buna
+karşın çalışma-zamanı \texttt{if} koşuluyla yapılsaydı her zaman ufak
+bir performans maliyeti olurdu, ama yeniden derleme gerekmezdi --
+kitap bu ödünleşimi (trade-off) açıkça belirtir).
+
+\subsection{/proc Dosya Sistemi ile Sorgulama}
+
+Sürekli \texttt{printk} basmak yerine, durumu \textbf{talep üzerine}
+(\texttt{ps}, \texttt{netstat} gibi) sorgulamak daha az müdahaleci bir
+yöntemdir. \texttt{/proc}, her dosyası bir kernel fonksiyonuna bağlı,
+yazılım tarafından anlık üretilen sanal bir dosya sistemidir.
+
+\begin{notkutu}{Kitabın uyarısı: /proc kullanımı art\i k \"onerilmiyor}
+Kitap açıkça belirtiyor: kernel geliştiricileri \texttt{/proc}'a yeni
+dosya eklemeyi \textbf{caydırıyor} -- orijinal amacının (process bilgisi)
+dışına taşıp "kontrolsüz bir çöplük" haline geldiği düşünülüyor. Modern
+önerilen yöntem \textbf{sysfs}'tir (Bölüm 14). Kitap yine de
+\texttt{/proc}'u anlatır çünkü hata ayıklama amaçlı basit kullanım
+için yeterlidir ve daha kolaydır.
+\end{notkutu}
+
+Basit salt-okunur bir \texttt{/proc} girdisi için (2.6.10-dönemi API):
+
+\begin{lstlisting}
+int (*read_proc)(char *page, char **start, off_t offset, int count,
+                  int *eof, void *data);
+
+struct proc_dir_entry *create_proc_read_entry(const char *name,
+        mode_t mode, struct proc_dir_entry *base,
+        read_proc_t *read_proc, void *data);
+\end{lstlisting}
+
+Kernel, sürücünün veri yazması için \texttt{PAGE\_SIZE} boyutunda bir
+tampon (\texttt{page}) ayırır; \texttt{count}/\texttt{offset} normal
+\texttt{read} ile aynı anlama gelir; \texttt{eof} sürücünün "veri
+bitti" diye işaretlediği bir \texttt{int} işaretçisidir. Modül
+kaldırılırken \texttt{remove\_proc\_entry()} ile girdi
+\textbf{mutlaka} silinmelidir.
+
+\begin{notkutu}{İki gotcha: proc girdileri modülün refcount'una bağlı değil}
+(1) \texttt{/proc} girdilerinin bir "sahibi" (owner) yoktur -- yani
+bir process dosyayı açıkken (\texttt{sleep 100 < /proc/dosyam})
+modül kaldırılırsa \textbf{çökme riski} vardır. (2) Kernel aynı
+isimde iki \texttt{/proc} girdisi oluşturulmasını \textbf{kontrol
+etmez} -- kitabın kendi ifadesiyle bu, "sınıflarda olduğu bilinen"
+bir hata kaynağıdır.
+\end{notkutu}
+
+Büyük çıktılar için modern/tercih edilen yaklaşım \textbf{seq\_file}
+arayüzüdür (\texttt{<linux/seq\_file.h>}) -- \texttt{start}/
+\texttt{next}/\texttt{stop}/\texttt{show} adlı dört yineleyici (iterator)
+fonksiyonu uygulanır, çıktı \texttt{seq\_printf} ile üretilir (ham
+\texttt{printk} ile değil). Kitap: "birden fazla küçük miktarda çıktı
+üreten her dosya için seq\_file kullanılmalı."
+
+\subsection{ioctl ile Hata Ay\i klama}
+
+\texttt{/proc}'a alternatif: sürücüye özel bir debug \texttt{ioctl}
+komutu ekleyip iç veri yapılarını user space'e kopyalamak. Avantajı:
+\texttt{/proc} dosyaları dizin listelemesinde \textbf{herkese görünür}
+(meraklı gözlerin dikkatini çeker), oysa belgelenmemiş bir ioctl
+komutu fark edilmesi zor ama gerektiğinde hâlâ oradadır. Dezavantajı:
+kullanmak için ayrı bir user-space programı yazman gerekir.
+
+\subsection{strace: Sistem \c{C}a\u{g}r\i lar\i n\i\ D\i\c{s}ar\i dan \.{I}zlemek}
+
+\texttt{strace}, bir user-space programının yaptığı \textbf{tüm sistem
+çağrılarını} -- isim, argümanlar, dönüş değeri -- sembolik biçimde
+gösterir. Kernel'in kendisinden bilgi aldığı için, izlenen programın
+\texttt{-g} ile derlenmiş olması gerekmez.
+
+\begin{notkutu}{Kitabın gerçek örneği: scull'un quantum sınırı strace'te nasıl görünür}
+\texttt{strace ls /dev > /dev/scull0} çalıştırıldığında:
+\texttt{write(1, ..., 4096) = 4088} sonra kalan 8 byte için ikinci bir
+\texttt{write} çağrısı görülür -- çünkü scull'un \texttt{write}'ı bir
+seferde sadece tek bir quantum (4000 byte civarı) kabul eder. Bu,
+\texttt{strace}'in bir sürücünün iç davranışını nasıl \textbf{dışarıdan
+gözlemlenebilir} kıldığının somut bir örneğidir.
+\end{notkutu}
+
+\subsection{Oops Mesajlar\i n\i\ Okumak}
+
+Çoğu kernel hatası \texttt{NULL} işaretçi dereference'ı ya da geçersiz
+bir işaretçi değeri şeklinde ortaya çıkar $\to$ bir \textbf{oops}
+mesajı. \textbf{Oops $\neq$ panic}: Linux dayanıklıdır, bir oops
+genelde sadece o anki process'i öldürür, sistem çalışmaya devam eder
+(panic ise tüm sistemi durdurur, çok daha nadirdir).
+
+Örnek (kitaptan, \texttt{faulty} modülünün \texttt{*(int*)0 = 0;}
+satırından):
+
+\begin{lstlisting}
+Unable to handle kernel NULL pointer dereference at virtual address 00000000
+Oops: 0002 [#1]
+EIP:    0060:[<d083a064>]    Not tainted
+EIP is at faulty_write+0x4/0x10 [faulty]
+...
+Call Trace:
+ [<c0150558>] vfs_write+0xb8/0x130
+ [<c0150682>] sys_write+0x42/0x70
+\end{lstlisting}
+
+Okuma stratejisi (kitabın kendi sırası):
+\begin{enumerate}[leftmargin=1.2cm]
+  \item \textbf{Önce \texttt{EIP is at ...} satırına bak} -- hatanın
+  tam olarak nerede olduğunu (fonksiyon adı + modül adı + fonksiyon
+  içindeki offset) sembolik olarak gösterir. Bu örnekte:
+  \texttt{faulty\_write} fonksiyonu, \texttt{faulty} modülü, fonksiyonun
+  başından 4 (hex) byte içeride, fonksiyon toplam 0x10 byte uzunlukta.
+  \item Yeterli değilse, \textbf{Call Trace} (çağrı yığını) bloğuna
+  bak -- oraya nasıl gelindiğini gösterir.
+  \item \textbf{"Tainted" bayrağı}na dikkat et -- GPL-olmayan/güvenilmez
+  bir modül yüklenmişse "Tainted" görünür, bu da hata raporunun ciddiye
+  alınma olasılığını etkiler.
+\end{enumerate}
+
+\begin{notkutu}{Sembolik traceback için gereken kernel ayarı}
+Call Trace'in \textbf{sembolik} (fonksiyon adlarıyla) görünmesi için
+kernel \texttt{CONFIG\_KALLSYMS} ile derlenmiş olmalı -- yoksa sadece
+ham hex adresler görürsün, hata ayıklama çok daha zorlaşır.
+\end{notkutu}
+
+\begin{notkutu}{Slab poison değerleri: \texttt{0xa5} ve \texttt{0x6b}}
+\texttt{CONFIG\_DEBUG\_SLAB} açıkken, kernel'in bellek ayırıcısı
+tahsis edilen her byte'ı çağırana vermeden önce \texttt{0xa5} deseniyle,
+serbest bırakılan belleği ise \texttt{0x6b} deseniyle doldurur. Bir
+oops mesajında ya da sürücü çıktısında tekrar eden \texttt{0xa5} veya
+\texttt{0x6b} (ya da \texttt{0xa5a5a5a5} gibi bir adres) görürsen, bu
+\textbf{başlatılmamış ya da serbest bırakılmış belleğin kullanıldığının}
+klasik bir işaretidir.
+\end{notkutu}
+
+\subsection{Sistem Kilitlenmeleri: Magic SysRq}
+
+Bazı hatalar oops bile vermeden sistemi \textbf{tamamen kilitler}.
+Kod sonsuz bir döngüye girerse, kernel zamanlamayı (scheduling)
+durdurabilir -- sistem Ctrl-Alt-Del dahil hiçbir şeye yanıt vermez.
+Önleyici teknik: uzun döngülerin içine stratejik noktalarda
+\texttt{schedule()} çağrıları eklemek (\textbf{ama asla bir spinlock
+tutarken \texttt{schedule()} çağırma}).
+
+\textbf{Magic SysRq} tuşu (Alt+SysRq+komut), çoğu kilitlenmede
+vazgeçilmez bir araçtır -- \texttt{CONFIG\_MAGIC\_SYSRQ} ile
+etkinleştirilmelidir (çoğu dağıtımda güvenlik nedeniyle
+\textbf{varsayılan olarak kapalıdır}). Faydalı komutlar:
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \texttt{r} -- klavyeyi raw moddan çıkarır (çökmüş bir X
+  sunucusunun bıraktığı garip klavye durumunu düzeltir).
+  \item \texttt{s} -- tüm diskleri acil senkronize eder (sync).
+  \item \texttt{u} -- tüm diskleri salt-okunur yeniden bağlar (umount);
+  genelde \texttt{s}'den hemen sonra, dosya sistemi kontrolü süresini
+  kısaltmak için.
+  \item \texttt{b} -- anında yeniden başlatır (önce \texttt{s} ve
+  \texttt{u} çalıştırılmalı!).
+  \item \texttt{p} -- işlemci register bilgisini yazdırır.
+  \item \texttt{t} -- güncel görev (task) listesini yazdırır.
+\end{itemize}
+
+\subsection{Debugger'lar: gdb, kdb, kgdb, UML}
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \textbf{gdb + /proc/kcore}: \texttt{gdb /usr/src/linux/vmlinux
+  /proc/kcore} -- \texttt{/proc/kcore}, tüm kernel adres alanını temsil
+  eden, okundukça \emph{üretilen} özel bir dosyadır. \textbf{Sınırlama}:
+  gdb veri okur ama \textbf{önbelleğe alır} -- \texttt{p jiffies} gibi
+  değişen bir değeri tekrar sorgularsan \textbf{eski (bayat) veri}
+  görebilirsin; \texttt{core-file /proc/kcore} komutunu tekrar
+  vererek önbelleği temizlemen gerekir. Ayrıca gdb bu modda
+  \textbf{breakpoint koyamaz, veri değiştiremez, tek adım
+  ilerleyemez} -- sadece okuma amaçlıdır. \texttt{CONFIG\_DEBUG\_INFO}
+  gerektirir.
+  \item \textbf{kdb}: resmi kernel'e dahil değildir (Linus Torvalds
+  interaktif debugger'lara felsefi olarak karşıdır -- "semptomu
+  yamalamayı, kök nedeni bulmayı değil teşvik ediyor" endişesiyle),
+  ayrı bir yama olarak dağıtılır, sadece x86'da çalışır.
+  \item \textbf{kgdb}: gerçek breakpoint/tek-adım desteği için iki
+  ayrı makine kullanır -- test edilen kernel bir "kurban" makinede,
+  gdb'nin kendisi \textbf{stabil bir masaüstünde} çalışır, aralarında
+  genelde bir \textbf{seri kablo} bağlantısı vardır.
+  \item \textbf{User-Mode Linux (UML)}: kernelin kendisini normal bir
+  user-space process'i olarak çalıştıran ayrı bir port. Avantajı:
+  hatalı kernel gerçek sistemi bozamaz. \textbf{Kritik kısıt}: UML
+  kernelinin gerçek donanıma \textbf{erişimi yoktur} -- donanımla
+  konuşan sürücü kodunu debug etmek için kullanılamaz.
+\end{itemize}
+
+\subsection*{B\"ol\"um 4 -- \"On Plana \c{C}\i kan Uyar\i lar}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Debug config seçenekleri (\texttt{CONFIG\_DEBUG\_*}) ekstra
+  çıktı üretir ve performansı düşürür -- bu yüzden üretim/dağıtım
+  kernellerinde bilinçli olarak kapalıdır.
+  \item \texttt{CONFIG\_INPUT\_EVBUG} \textbf{her tuş vuruşunu, şifreler
+  dahil} loglar -- açık bir güvenlik uyarısı.
+  \item \texttt{/proc} girdisi kaldırmayı unutmak, modül kaldırılırken
+  beklenmedik çökmelere yol açar.
+  \item \texttt{schedule()} çağrıları reentrant çağrılara kapı açar --
+  asla bir spinlock tutarken çağrılmamalı.
+\end{itemize}
+
+\newpage
+
+%=================================================================
+\section{E\c{s}zamanl\i l\i k ve Race Condition'lar}
+\label{sec:bolum5}
+%=================================================================
+
+\begin{notkutu}{Bu bölüm neden senin için en kritik olabilir}
+Senin \texttt{ahmet.c}'inde \textbf{şu an hiçbir kilitleme yok} --
+global \texttt{buffer} ve \texttt{buffer\_size} değişkenleri
+korumasız. Bu bölüm tam olarak bunun neden tehlikeli olduğunu ve nasıl
+düzeltileceğini anlatıyor.
+\end{notkutu}
+
+\subsection{scull'daki Somut Race Condition}
+
+Kitap, scull'un \texttt{write} kodundan gerçek bir parça üzerinden
+race condition'ı gösterir:
+
+\begin{lstlisting}
+if (!dptr->data[s_pos]) {
+    dptr->data[s_pos] = kmalloc(quantum, GFP_KERNEL);
+    if (!dptr->data[s_pos])
+        goto out;
+}
+\end{lstlisting}
+
+\textbf{Senaryo}: İki process, A ve B, \textbf{aynı scull cihazının aynı
+ofsetine} aynı anda yazıyor.
+\begin{enumerate}[leftmargin=1.2cm]
+  \item Her ikisi de \texttt{if (!dptr->data[s\_pos])} testine
+  \textbf{aynı anda} ulaşır.
+  \item İşaretçi \texttt{NULL} olduğu için \textbf{ikisi de} bellek
+  ayırmaya karar verir ve sonucu aynı yere atar.
+  \item İki atama da aynı konuma yazdığı için, sadece \textbf{sonuncusu}
+  "kazanır."
+  \item scull, \textbf{ilk (kaybeden) process'in ayırdığı belleği
+  tamamen unutur} -- bu bellek asla serbest bırakılmaz $\to$
+  \textbf{bellek sızıntısı}.
+\end{enumerate}
+
+Kitabın tanımı: \textbf{"Race condition, paylaşılan veriye kontrolsüz
+erişimin bir sonucudur. Yanlış erişim örüntüsü gerçekleştiğinde,
+beklenmedik bir şey olur."} Ve önemli bir uyarı: \textbf{"Programcılar
+race condition'ları son derece düşük olasılıklı olaylar olarak
+görmezden gelmeye meyillidir. Ama bilgi işlem dünyasında, milyonda bir
+olay her birkaç saniyede bir gerçekleşebilir, ve sonuçları ciddi
+olabilir."}
+
+\subsection{Genel Kural: Payla\c{s}\i lan Kaynak = Y\"onetim Zorunlulu\u{g}u}
+
+Kitabın "sert kural"ı (tam ifadeyle): \textbf{"bir donanım ya da
+yazılım kaynağı tek bir çalışma iş parçacığının (thread of execution)
+ötesinde paylaşıldığında, ve bir iş parçacığının o kaynağın tutarsız
+bir görünümüyle karşılaşma olasılığı varsa, o kaynağa erişimi açıkça
+yönetmek zorundasın."}
+
+Eşzamanlılığın kaynakları (kitabın listesi):
+\begin{enumerate}[leftmargin=1.2cm]
+  \item Birden fazla user-space process'in sürücü koduna "şaşırtıcı
+  kombinasyonlarda" erişmesi.
+  \item SMP sistemlerde farklı işlemcilerin sürücü kodunu \textbf{gerçekten
+  aynı anda} çalıştırması.
+  \item \textbf{Kernel preemption} -- 2.6 kernel kodu önceliklenebilir
+  (preemptible); sürücü kodun herhangi bir anda işlemciyi kaybedebilir,
+  ve yerine geçen process de aynı sürücü kodunda olabilir.
+  \item Kesmeler (interrupt) -- asenkron olarak sürücü kodunun eşzamanlı
+  çalışmasına neden olur.
+  \item Ertelenmiş çalıştırma mekanizmaları (workqueue, tasklet, timer).
+  \item Takılıp-çıkarılabilir (hot-pluggable) cihazlar -- cihaz tam
+  onunla uğraşırken ortadan kaybolabilir.
+\end{enumerate}
+
+\subsection{Semaphore ve Mutex}
+
+\textbf{Kritik bölge (critical section)}: "aynı anda sadece bir iş
+parçacığı tarafından çalıştırılabilecek kod."
+
+\begin{lstlisting}
+DECLARE_MUTEX(name);          /* 1'e ilklendirilmis */
+DECLARE_MUTEX_LOCKED(name);   /* 0'a ilklendirilmis (kilitli baslar) */
+void init_MUTEX(struct semaphore *sem);
+void init_MUTEX_LOCKED(struct semaphore *sem);
+
+void down(struct semaphore *sem);              /* kesilemez uyku */
+int  down_interruptible(struct semaphore *sem); /* sinyal ile kesilebilir */
+int  down_trylock(struct semaphore *sem);       /* hic uyumaz */
+void up(struct semaphore *sem);
+\end{lstlisting}
+
+\begin{notkutu}{down\_interruptible neredeyse her zaman doğru seçimdir}
+\texttt{down()} (kesilemez) kullanmak "öldürülemeyen process'ler
+yaratmanın iyi bir yolu" (ps çıktısındaki korkulan \texttt{D} durumu) --
+kullanıcıları rahatsız eder. \textbf{Kural}: \texttt{down\_interruptible}
+sıfırdan farklı dönerse, semafor \textbf{tutulmuyor demektir} --
+dönüş değeri her zaman kontrol edilmeli, ve tipik olarak
+\texttt{-ERESTARTSYS} döndürülmelidir.
+\end{notkutu}
+
+\begin{notkutu}{ERESTARTSYS kuralı}
+\texttt{-ERESTARTSYS} döndürüyorsan, önce kullanıcıya görünür herhangi
+bir değişikliği geri almalısın (ki syscall yeniden başladığında doğru
+çalışsın); geri alamıyorsan bunun yerine \texttt{-EINTR} döndürmelisin.
+\end{notkutu}
+
+\subsubsection{scull'da semafor kullan\i m\i}
+
+\begin{lstlisting}
+struct scull_dev {
+    ...
+    struct semaphore sem;  /* karsilikli dislama semaforu */
+    struct cdev cdev;
+};
+
+for (i = 0; i < scull_nr_devs; i++) {
+    scull_devices[i].quantum = scull_quantum;
+    scull_devices[i].qset = scull_qset;
+    init_MUTEX(&scull_devices[i].sem);
+    scull_setup_cdev(&scull_devices[i], i);
+}
+\end{lstlisting}
+
+\begin{notkutu}{Kritik sıralama kuralı}
+Semafor, \textbf{cihaz sistemin geri kalanına açılmadan önce}
+ilklendirilmeli -- yani \texttt{init\_MUTEX}, \texttt{scull\_setup\_cdev}
+(içinde \texttt{cdev\_add} çağıran) \textbf{çağrılmadan önce}
+gelmelidir. Sıra tersine çevrilirse, "semaforun hazır olmadan önce
+erişilebileceği bir race condition yaratılır." Bu aynen Bölüm 2'de
+gördüğün "bir yeteneği tamamen hazır olmadan kaydetme" kuralının somut
+bir örneğidir.
+\end{notkutu}
+
+\textbf{Neden global tek bir semafor değil, cihaz-başına semafor?}
+Kitap: "çeşitli scull cihazları hiçbir kaynağı ortak kullanmıyor...
+bir process farklı bir scull cihazıyla çalışırken diğerini beklemeye
+zorlamak için hiçbir gerekçe yok" -- paralelliği artırır.
+
+\subsection{Reader/Writer Semaphore (rwsem)}
+
+Çoğu görev salt-okunur/yazma olarak ayrışır; \texttt{struct
+rw\_semaphore} birden fazla eşzamanlı okuyucuya (yazar yokken) izin
+verir:
+
+\begin{lstlisting}
+void down_read(struct rw_semaphore *sem);
+int  down_read_trylock(struct rw_semaphore *sem);  /* NOT: basari=sifirdan FARKLI, tersi degil! */
+void up_read(struct rw_semaphore *sem);
+void down_write(struct rw_semaphore *sem);
+void up_write(struct rw_semaphore *sem);
+\end{lstlisting}
+
+\begin{notkutu}{İnce ama önemli tersine dönüş}
+\texttt{down\_read\_trylock}/\texttt{down\_write\_trylock} çoğu kernel
+fonksiyonunun aksine \textbf{sıfırdan farklı = başarı, sıfır = başarısız}
+kuralını kullanır -- kitap bunu açıkça "çoğu kernel fonksiyonunun
+tersi bir kural" diye işaretliyor.
+\end{notkutu}
+
+\textbf{rwsem'lerde yazarlar önceliklidir} -- bir yazar beklemeye
+başladığında yeni okuyucular kabul edilmez, bu da \textbf{okuyucu
+açlığına} (reader starvation) yol açabilir. Bu yüzden rwsem'ler sadece
+yazma erişiminin nadir ve kısa olduğu durumlarda tercih edilmeli.
+
+\subsection{Completion: "\.{I}\c{s} Bitti" Bildirimi}
+
+\textbf{Yanlış yaklaşım} (kitabın açıkça uyardığı): bir işi başlatıp
+kilitli bir semaforda \texttt{down()} ile beklemek, işi yapan taraf
+\texttt{up()} çağırınca devam etmek. Bu yanlış çünkü: (1) semaforlar
+"müsait" (uncontended) hızlı yol için optimize edilmiştir, oysa burada
+çağıran neredeyse \textbf{her zaman} bekleyecektir -- tam tersi
+senaryo; (2) semafor bir \textbf{stack (otomatik) değişkeni} olarak
+tanımlanmışsa, bekleyen taraf fonksiyonundan dönüp semaforu yok
+ederken, sinyal veren taraf hâlâ ona dokunuyor olabilir -- ciddi bir
+race condition.
+
+Bu yüzden \textbf{completion} arayüzü eklenmiştir:
+
+\begin{lstlisting}
+DECLARE_COMPLETION(my_completion);
+/* veya dinamik: */
+struct completion my_completion;
+init_completion(&my_completion);
+
+void wait_for_completion(struct completion *c);  /* kesilemez bekleme! */
+void complete(struct completion *c);      /* sadece TEK bekleyeni uyandirir */
+void complete_all(struct completion *c);  /* TUM bekleyenleri uyandirir */
+\end{lstlisting}
+
+\begin{notkutu}{wait\_for\_completion kesilemez}
+\texttt{wait\_for\_completion} \textbf{kesilemez} (uninterruptible)
+bir bekleme yapar -- eğer hiç kimse \texttt{complete()} çağırmazsa,
+sonuç \textbf{öldürülemeyen bir process}tir. Bu yüzden bu API'yi
+kullanırken, birinin gerçekten \texttt{complete} çağıracağından emin
+olmalısın.
+\end{notkutu}
+
+\subsection{Spinlock: Uyuyamayan Kod \.{I}\c{c}in Kilit}
+
+Semaforun aksine spinlock \textbf{uyku gerektirmez/desteklemez} --
+kesme işleyicileri gibi uyuyamayan bağlamlarda kullanılır. Kilidi
+alamayan kod, müsait olana kadar sıkı bir döngüde bekler ("spin
+eder").
+
+\begin{notkutu}{Çekirdek kural: spinlock tutarken asla uyuma}
+"Bir spinlock tutan herhangi bir kod \textbf{atomik} olmak zorundadır.
+Uyuyamaz; hatta kesmelere hizmet etmek dışında herhangi bir nedenle
+işlemciyi bırakamaz (bazen o bile mümkün olmaz)." Neden? Eğer kilidi
+tutan kod uyursa (örn. \texttt{copy\_from\_user} ya da
+\texttt{kmalloc(GFP\_KERNEL)} gibi \textbf{gizlice uyuyabilen}
+fonksiyonlar çağrılırsa), kilit süresiz tutulabilir -- diğer taraflar
+sonsuza kadar bekler, \textbf{sistem kilitlenebilir}.
+\end{notkutu}
+
+\begin{notkutu}{Aynı-CPU kesme kilitlenmesi (deadlock) senaryosu}
+Sürücü bir spinlock'u tutuyor; tutarken cihaz bir kesme (interrupt)
+üretiyor, kesme işleyicisi de \textbf{aynı kilidi} istiyor. Eğer
+kesme, kilidi tutan işlemcinin \textbf{aynısında} gerçekleşirse:
+kesilmeyen (non-interrupt) kod artık çalışıp kilidi serbest bırakma
+şansı bulamaz -- o işlemci \textbf{sonsuza kadar döner}. Çözüm: kilidi
+tutarken \textbf{o işlemcideki kesmeleri devre dışı bırakan} varyantları
+kullanmak.
+\end{notkutu}
+
+\begin{lstlisting}
+spinlock_t my_lock = SPIN_LOCK_UNLOCKED;   /* derleme-zamani */
+spin_lock_init(spinlock_t *lock);          /* calisma-zamani */
+
+void spin_lock(spinlock_t *lock);
+void spin_lock_irqsave(spinlock_t *lock, unsigned long flags);
+void spin_lock_irq(spinlock_t *lock);
+void spin_lock_bh(spinlock_t *lock);       /* sadece softirq/tasklet'i kapatir */
+
+void spin_unlock(spinlock_t *lock);
+void spin_unlock_irqrestore(spinlock_t *lock, unsigned long flags);
+void spin_unlock_irq(spinlock_t *lock);
+void spin_unlock_bh(spinlock_t *lock);
+\end{lstlisting}
+
+\begin{notkutu}{Hangi varyant, ne zaman?}
+Kilit bir \textbf{donanım kesme işleyicisi} tarafından da alınabiliyorsa
+$\to$ \texttt{\_irqsave}/\texttt{\_irq} formlarından biri
+\textbf{zorunlu} (yoksa sistem er geç kilitlenebilir). Kilit sadece bir
+tasklet/softirq bağlamından da alınıyorsa (donanım kesmesinden değil)
+$\to$ \texttt{\_bh} yeterli, donanım kesmeleri açık kalabilir.
+\texttt{spin\_lock\_irqsave}/\texttt{spin\_unlock\_irqrestore}
+\textbf{aynı fonksiyonda, aynı \texttt{flags} değişkeniyle}
+eşleştirilmeli -- aksi halde bazı mimarilerde kod bozulabilir.
+\end{notkutu}
+
+\textbf{Kilit tutma süresi kuralı}: spinlock'lar \textbf{mümkün olan
+en kısa süre} tutulmalı -- uzun tutulan bir kilit, diğer işlemcilerin
+bekleme süresini ve zamanlama gecikmesini (scheduling latency) doğrudan
+kötüleştirir.
+
+\subsection{Kilitleme Tuzaklar\i}
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \textbf{Self-deadlock}: bir fonksiyon bir kilidi alıp, sonra
+  \textbf{aynı kilidi} tekrar almaya çalışan başka bir fonksiyonu
+  çağırırsa, kod kilitlenir -- ne semaphore ne spinlock, bir kilit
+  sahibinin kilidi ikinci kez almasına izin vermez, basitçe asılı
+  kalır.
+  \item \textbf{Sıralama (ordering) deadlock'u}: iki kilit
+  (\texttt{Lock1}, \texttt{Lock2}) varsa ve bir thread önce
+  \texttt{Lock1} sonra \texttt{Lock2} alırken, başka bir thread önce
+  \texttt{Lock2} sonra \texttt{Lock1} almaya çalışırsa \textbf{ikisi
+  de kilitlenir}. \textbf{Çözüm}: birden fazla kilit alınacaksa,
+  \textbf{her zaman aynı sırayla} alınmalı. Genel kural: yerel
+  (kendi) kilidini, kernelin daha merkezi bir kilidinden \textbf{önce}
+  al; semaforları spinlock'lardan \textbf{önce} al (bir spinlock
+  tutarken \texttt{down} çağırmak -- yani uyuyabilecek bir şey
+  çağırmak -- "ciddi bir hatadır").
+  \item \textbf{Büyük Kernel Kilidi (BKL)}: Linux'un ilk SMP-uyumlu
+  kerneli (2.0) tek bir spinlock'a sahipti -- tüm kerneli tek bir
+  dev kritik bölgeye çeviriyordu. 2.6'da hâlâ (çok azaltılmış biçimde)
+  var, ama kitap açıkça uyarıyor: \textbf{"yeni kodda onu kullanmayı
+  aklından bile geçirme."}
+  \item \textbf{İnce mi kaba mı taneli kilitleme}: kitabın tavsiyesi
+  sürücü yazarları için nettir: \textbf{"gerçek bir çekişme (contention)
+  sorunu olacağına dair somut bir sebep olmadıkça, görece kaba taneli
+  kilitlemeyle başla. Erken optimizasyon dürtüsüne direnç göster;
+  gerçek performans kısıtlamaları genelde beklenmedik yerlerde ortaya
+  çıkar."}
+\end{itemize}
+
+\subsection{Kilitlemeye Alternatifler}
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \textbf{Dairesel tampon (lock-free)}: tek yazar/tek okuyucu
+  senaryosunda, yazar veriyi \textbf{önce} tamponun içine yazıp
+  \textbf{sonra} yazma-indeksini güncellerse, okuyucu her zaman
+  tutarlı bir görünüm görür -- \textbf{hiç kilide gerek kalmadan}.
+  2.6.10'dan itibaren kernel'de hazır bir uygulaması var:
+  \texttt{<linux/kfifo.h>}.
+  \item \textbf{atomic\_t}: tek bir tamsayı üzerinde atomik işlemler
+  (\texttt{<asm/atomic.h>}). \textbf{24 bitten fazlasına güvenme}
+  (bazı mimarilerin sınırlaması).
+  \begin{lstlisting}
+atomic_t v = ATOMIC_INIT(0);
+atomic_set(&v, i); atomic_read(&v);
+atomic_inc(&v); atomic_dec(&v);
+int atomic_dec_and_test(atomic_t *v); /* sonuc 0 ise true doner */
+  \end{lstlisting}
+  \begin{notkutu}{atomic\_t sadece TEK değişkeni korur}
+  İki ayrı \texttt{atomic\_t} üzerinde art arda işlem yaparsan
+  (\texttt{atomic\_sub(...,\ \&a); atomic\_add(...,\ \&b);}), ikisi
+  arasında bir pencere vardır -- "a" değişmiş ama "b" henüz
+  değişmemiş bir an. Bu ara durum başka bir threadi etkileyebiliyorsa,
+  \textbf{yine de kilit gerekir} -- atomic\_t bileşik (çok değişkenli)
+  işlemleri atomik yapmaz.
+  \end{notkutu}
+  \item \textbf{Bit işlemleri}: \texttt{set\_bit}, \texttt{clear\_bit},
+  \texttt{test\_and\_set\_bit} vb. (\texttt{<asm/bitops.h>}) atomik bit
+  erişimi sağlar. Kitap bit-tabanlı elle kilitlemeyi \textbf{caydırır}:
+  "yeni kodda spinlock kullanmak çok daha iyidir; spinlock'lar iyi
+  test edilmiştir, kesme/preemption gibi konuları halleder, ve kodunu
+  okuyan başkalarının ne yaptığını anlamak için uğraşmasına gerek
+  kalmaz."
+  \item \textbf{RCU (Read-Copy-Update)}: okumanın sık, yazmanın nadir
+  olduğu durumlar için ileri düzey, kilitsiz bir teknik -- veri sadece
+  \textbf{işaretçi üzerinden} erişilmeli. Yazar değişikliği önce bir
+  \textbf{kopya} üzerinde yapar, sonra işaretçiyi tek bir atomik
+  adımda yeni kopyaya yönlendirir; eski kopya, tüm işlemcilerin en az
+  bir kez zamanlanmasından sonra (artık kimse referans tutmuyor
+  garantisiyle) \texttt{call\_rcu()} ile serbest bırakılır. Gerçek
+  kullanım örneği: ağ yönlendirme tabloları.
+\end{itemize}
+
+\begin{notkutu}{Kitapta AÇIKÇA yer almayan bir modern API: struct mutex}
+Bu bölümün kitaptaki hali \textbf{sadece} eski semaphore-tabanlı
+\texttt{DECLARE\_MUTEX}/\texttt{down}/\texttt{up} API'sini "mutex"
+olarak anlatır. Daha sonraki kernel sürümlerinde eklenen hafif
+\texttt{struct mutex} API'si (\texttt{mutex\_init},
+\texttt{mutex\_lock}, \texttt{mutex\_unlock}) bu kitapta \textbf{hiç
+geçmiyor} -- bu, kitabın 2005 tarihli olmasından kaynaklanan bir
+eksiklik, sana ait bir hata değil. Bugünkü (\texttt{7.0.0} gibi
+modern) bir kernelde yeni kod yazarken \texttt{struct mutex} tercih
+edilir; kavramsal olarak burada anlatılan semaphore-mutex mantığıyla
+birebir aynı işi görür, sadece daha hafif ve modern bir API'dir.
+\end{notkutu}
+
+\subsection*{B\"ol\"um 5 -- \"On Plana \c{C}\i kan Uyar\i lar}
+\begin{enumerate}[leftmargin=1.2cm]
+  \item Kilitleri, korunan nesneyi sistemin geri kalanına açmadan
+  \textbf{önce} ilklendir.
+  \item Her \texttt{down}/\texttt{spin\_lock} için, \textbf{hata
+  yollarını dahil} tam olarak bir eşleşen \texttt{up}/\texttt{spin\_unlock}.
+  \item Spinlock tutarken asla uyuma -- \texttt{copy\_from\_user} ve
+  \texttt{kmalloc(GFP\_KERNEL)} gibi gizli uyku noktalarına dikkat.
+  \item Aynı-CPU'da kesme kaynaklı kendine-kilitlenmeyi önlemek için
+  gerektiğinde \texttt{\_irqsave}/\texttt{\_irq} varyantlarını kullan.
+  \item Birden fazla kilidi hep \textbf{aynı sırada} al; semaforları
+  spinlock'lardan önce al.
+  \item BKL'yi (\texttt{lock\_kernel}) yeni kodda asla kullanma.
+  \item Erken optimizasyona direnç göster -- kaba taneli kilitle
+  başla, gerçek çekişme kanıtlanınca inceltmeyi düşün.
+\end{enumerate}
+
+\newpage
+
+%=================================================================
+\section{Geli\c{s}mi\c{s} Karakter S\"ur\"uc\"u \.{I}\c{s}lemleri}
+\label{sec:bolum6}
+%=================================================================
+
+\begin{notkutu}{Kernel sürümü notu}
+Kitap bu bölümde \textbf{eski tip} \texttt{.ioctl} imzasını kullanır:
+\texttt{int (*ioctl)(struct inode *, struct file *, unsigned int,
+unsigned long)}. Daha yeni kernellerde (3.x ve sonrası) bunun yerine
+\texttt{.unlocked\_ioctl} kullanılır (\texttt{struct inode}
+parametresi olmadan, ve örtük "Big Kernel Lock" kaldırılmış halde).
+Kavramlar (komut kodlama, \texttt{access\_ok}, capabilities) birebir
+aynı kalır; sadece fonksiyon imzası değişmiştir -- bunu bilerek
+oku.
+\end{notkutu}
+
+\subsection{ioctl: Genel Bak\i\c{s}}
+
+Kullanıcı tarafı imza: \texttt{int ioctl(int fd, unsigned long cmd,
+...);}. Buradaki \texttt{...} gerçek bir değişken-argüman listesi
+\textbf{değildir} (sistem çağrıları değişken argüman sayısı alamaz) --
+sadece derleyicinin üçüncü argüman üzerinde tip kontrolünü
+\textbf{kapatmak} için oradadır. Gerçekte tek bir \texttt{unsigned
+long} argüman iletilir; kullanıcı bir işaretçi geçirirse kernel onu
+\texttt{unsigned long} olarak alır.
+
+Çoğu ioctl uygulaması tek bir büyük \texttt{switch(cmd)} bloğudur.
+
+\subsection{Komut Numaras\i\ Kodlama\c{s}\i : Neden Bu Kadar Karma\c{s}\i k?}
+
+\textbf{Temel gerekçe} (kitaptan): ioctl komut numaraları \textbf{sistem
+genelinde benzersiz} olmalıdır -- aksi halde bir program yanlışlıkla
+\emph{yanlış cihaza} doğru numaralı ama farklı anlamdaki bir komut
+gönderebilir (örneğin bir FIFO'ya, bir seri portun baud rate komutunu
+göndermek gibi). Her numara benzersizse, yanlış eşleşme
+\texttt{-EINVAL} ile başarısız olur -- yanlışlıkla \textbf{istenmeyen
+bir işlemi çalıştırmak yerine}.
+
+Modern kodlama şeması dört bit alanından oluşur
+(\texttt{<asm/ioctl.h>}):
+\begin{itemize}[leftmargin=1.2cm]
+  \item \textbf{type} (magic number) -- sürücü başına bir sayı, 8 bit.
+  \item \textbf{number} -- sıra numarası, 8 bit, kendi başına bir
+  anlamı yok.
+  \item \textbf{direction} -- \textbf{uygulamanın bakış açısından}
+  veri yönü: \texttt{\_IOC\_NONE}, \texttt{\_IOC\_READ} (uygulama
+  cihazdan okuyor), \texttt{\_IOC\_WRITE} (uygulama cihaza yazıyor),
+  ya da ikisinin OR'u.
+  \item \textbf{size} -- veri boyutu; kernel bunu \textbf{zorunlu
+  kılmaz} ama iyi pratik olarak kullanıcı hatalarını yakalamaya yarar.
+\end{itemize}
+
+Kodlama makroları:
+\begin{lstlisting}
+_IO(type, nr)              /* argumansiz komut */
+_IOR(type, nr, datatype)   /* driver'dan OKUMA */
+_IOW(type, nr, datatype)   /* driver'a YAZMA */
+_IOWR(type, nr, datatype)  /* iki yonlu */
+\end{lstlisting}
+
+scull'un tanımladığı komutlar:
+\begin{lstlisting}
+#define SCULL_IOC_MAGIC  'k'
+#define SCULL_IOCRESET    _IO(SCULL_IOC_MAGIC, 0)
+#define SCULL_IOCSQUANTUM _IOW(SCULL_IOC_MAGIC,  1, int)  /* Set: pointer ile */
+#define SCULL_IOCTQUANTUM _IO(SCULL_IOC_MAGIC,   3)       /* Tell: deger ile */
+#define SCULL_IOCGQUANTUM _IOR(SCULL_IOC_MAGIC,  5, int)  /* Get: pointer ile */
+#define SCULL_IOCQQUANTUM _IO(SCULL_IOC_MAGIC,   7)       /* Query: return degeriyle */
+#define SCULL_IOC_MAXNR 14
+\end{lstlisting}
+
+\textbf{Dönüş değeri kuralı}: bilinmeyen \texttt{cmd} için POSIX'e
+göre \texttt{-ENOTTY} döndürülmeli ("Inappropriate ioctl for device")
+-- tarihsel olarak sadece tty'lerin ioctl'i olduğu dönemden kalma
+(\texttt{-EINVAL} de pratikte sık görülür ama standart olan
+\texttt{-ENOTTY}'dir).
+
+\begin{notkutu}{Önceden tanımlı komutlar sürücünden önce yorumlanır}
+Bazı ioctl komutları (\texttt{FIONBIO}, \texttt{FIOASYNC}...) kernel
+tarafından \textbf{senin \texttt{.ioctl} metodun çağrılmadan önce}
+yorumlanır. Eğer kendi komutun için aynı sayısal değeri seçersen,
+komutun sürücüne \textbf{asla ulaşmaz} -- kernel onu yakalar, uygulama
+beklenmedik davranış görür.
+\end{notkutu}
+
+\subsection{ioctl Argüman\i n\i n G\"uvenli Kullan\i m\i}
+
+\texttt{arg} bir işaretçiyse, dereference etmeden önce doğrulanmalıdır:
+
+\begin{lstlisting}
+int access_ok(int type, const void *addr, unsigned long size);
+/* type: VERIFY_READ veya VERIFY_WRITE (WRITE, READ'in ustkumesidir) */
+/* DONUS: 1 = basari, 0 = basarisizlik -- coğu kernel fonksiyonunun TERSI! */
+\end{lstlisting}
+
+scull'un komut doğrulaması, hem sayısal geçerliliği hem yön bitlerini
+kontrol eder:
+\begin{lstlisting}
+if (_IOC_TYPE(cmd) != SCULL_IOC_MAGIC) return -ENOTTY;
+if (_IOC_NR(cmd) > SCULL_IOC_MAXNR) return -ENOTTY;
+
+if (_IOC_DIR(cmd) & _IOC_READ)
+    err = !access_ok(VERIFY_WRITE, (void __user *)arg, _IOC_SIZE(cmd));
+else if (_IOC_DIR(cmd) & _IOC_WRITE)
+    err = !access_ok(VERIFY_READ, (void __user *)arg, _IOC_SIZE(cmd));
+if (err) return -EFAULT;
+\end{lstlisting}
+
+\begin{notkutu}{Kafa karıştırıcı ama önemli: yön tersine döner}
+\textbf{ioctl komutunun} yönü uygulama-odaklıdır (\texttt{\_IOC\_READ}
+= uygulama okuyor); \textbf{access\_ok'un} \texttt{type}'ı kernel-
+odaklıdır (kernel bu belleğe \textbf{yazacaksa} \texttt{VERIFY\_WRITE}
+gerekir). Uygulamanın "okuması," kernelin oraya "yazması" demektir --
+bu tersine dönüş kolayca kafa karıştırır, dikkatli ol.
+\end{notkutu}
+
+Tek bir değer aktarmak için, \texttt{access\_ok} zaten geçtiyse daha
+hızlı makrolar kullanılabilir:
+\begin{lstlisting}
+__put_user(datum, ptr);  /* access_ok'u ATLAR, onceden dogrulanmis olmali */
+__get_user(local, ptr);
+put_user(datum, ptr);    /* kendi icinde access_ok cagirir */
+get_user(local, ptr);
+\end{lstlisting}
+
+\subsection{Capabilities: root Yerine \.{I}nce Taneli Yetki}
+
+Geleneksel Unix modeli hep-ya-da-hiç'tir (sadece root). Linux bunun
+yerine \textbf{capabilities} sunar -- ayrıcalıklı işlemler alt
+gruplara bölünür. Sürücü yazarları için önemli olanlar:
+\texttt{CAP\_SYS\_ADMIN} (genel yönetim, "daha spesifik bir capability
+yokluğunda" en sık kullanılan), \texttt{CAP\_SYS\_MODULE},
+\texttt{CAP\_SYS\_RAWIO}, \texttt{CAP\_DAC\_OVERRIDE}.
+
+\begin{lstlisting}
+int capable(int capability);  /* surecin bu yetkiye sahip olup olmadigini dondurur */
+
+case SCULL_IOCSQUANTUM:
+    if (! capable (CAP_SYS_ADMIN))
+        return -EPERM;
+    retval = __get_user(scull_quantum, (int __user *)arg);
+    break;
+\end{lstlisting}
+
+scull'un politikası: herkes quantum/qset boyutunu \textbf{sorgulayabilir}
+(Get/Query), ama sadece yetkili kullanıcılar \textbf{değiştirebilir}
+(Set/Tell) -- kötü değerler performansı bozabilir.
+
+\subsection{Blocking I/O: Process'i Uyutmak}
+
+\subsubsection{Üç temel kural (kitaptan, aynen)}
+
+\begin{enumerate}[leftmargin=1.2cm]
+  \item \textbf{Atomik bağlamda asla uyuma.} Bir spinlock, seqlock,
+  ya da RCU kilidi tutarken, ya da kesmeler kapalıyken uyuyamazsın.
+  Bir semafor tutarken uyumak \textbf{yasal}dır ama çok kısa olmalı ve
+  o semaforu tutmanın seni uyandıracak tarafı bloklamadığından emin
+  olmalısın.
+  \item \textbf{Uyandıktan sonra sistem durumu hakkında hiçbir varsayım
+  yapma.} Ne kadar uyuduğunu, o sırada neyin değiştiğini bilemezsin;
+  başka bir process aynı olay için uyuyor olabilir ve senden önce
+  kaynağı "kazanmış" olabilir. \textbf{Beklediğin koşulu her zaman
+  yeniden kontrol etmelisin.}
+  \item \textbf{Process'in uyanacağından emin olmadan uyuma.} Bir
+  yerde, birinin seni uyandırması garanti olmalı.
+\end{enumerate}
+
+\subsubsection{wait\_event ailesi}
+
+\begin{lstlisting}
+DECLARE_WAIT_QUEUE_HEAD(name);          /* derleme-zamani */
+wait_queue_head_t q; init_waitqueue_head(&q);  /* calisma-zamani */
+
+wait_event(queue, condition);
+wait_event_interruptible(queue, condition);  /* tercih edilen */
+wait_event_timeout(queue, condition, zamanasimi);
+wait_event_interruptible_timeout(queue, condition, zamanasimi);
+\end{lstlisting}
+
+\begin{notkutu}{wait\_event neden race-condition'a dayanıklı}
+\texttt{condition}, makro tarafından \textbf{hem uyumadan önce hem
+uyandıktan sonra} değerlendirilir ve koşul doğru olana kadar makro
+içeride \textbf{döngüyle} beklemeye devam eder. Bu, "check sonra
+uyu" arasındaki klasik race'i (kaçırılan uyandırma) kapatan yerleşik
+mekanizmadır -- ayrıca \texttt{condition}'ın \textbf{yan etkisi
+olmamalı}, çünkü kaç kez değerlendirileceği belirsizdir.
+\texttt{wait\_event\_interruptible} sinyalle kesilirse sıfırdan farklı
+döner -- bu durumda sürücü \texttt{-ERESTARTSYS} döndürmelidir.
+\end{notkutu}
+
+\begin{lstlisting}
+void wake_up(wait_queue_head_t *queue);
+void wake_up_interruptible(wait_queue_head_t *queue);
+\end{lstlisting}
+
+\subsubsection{sleepy örneği: paylaşılan bayrak race'i}
+
+\begin{lstlisting}
+static DECLARE_WAIT_QUEUE_HEAD(wq);
+static int flag = 0;
+
+ssize_t sleepy_read (struct file *filp, char __user *buf, size_t count, loff_t *pos)
+{
+    wait_event_interruptible(wq, flag != 0);
+    flag = 0;
+    return 0;
+}
+ssize_t sleepy_write (struct file *filp, const char __user *buf, size_t count, loff_t *pos)
+{
+    flag = 1;
+    wake_up_interruptible(&wq);
+    return count;
+}
+\end{lstlisting}
+
+\begin{notkutu}{Kitabın açıkça gösterdiği gotcha}
+İki process \texttt{sleepy\_read}'de uyuyorken \texttt{sleepy\_write}
+bir kez çalışırsa, \texttt{wake\_up\_interruptible} \textbf{ikisini de}
+uyandırır -- ikisi de \texttt{flag != 0}'ı sıfırlanmadan önce görebilir,
+yani ikisi de yanlışlıkla "koşul doğru" sonucuna varabilir. Kitap:
+"gerçek bir sürücüde bu tür bir race, teşhisi zor, nadir çökmeler
+yaratabilir." Tam olarak bu yüzden \texttt{scullpipe} bir bayrak
+yerine \textbf{semafor + dairesel tampon} kullanır -- durumu atomik
+olarak test eder.
+\end{notkutu}
+
+\subsubsection{O\_NONBLOCK ve -EAGAIN}
+
+\texttt{filp->f\_flags} içindeki \texttt{O\_NONBLOCK} bayrağı
+ayarlıysa, veri/yer yokken \texttt{read}/\texttt{write} \textbf{hemen}
+\texttt{-EAGAIN} döndürmelidir -- process'i asla bloklamaz. Sadece
+\texttt{read}, \texttt{write}, ve \texttt{open} bu bayraktan etkilenir.
+
+\subsubsection{scullpipe: Ger\c{c}ek Bir Bloklayan Okuma \"Ornek}
+
+\begin{lstlisting}
+struct scull_pipe {
+    wait_queue_head_t inq, outq;  /* okuma ve yazma kuyruklari */
+    char *buffer, *end;
+    int buffersize;
+    char *rp, *wp;                /* nereden oku, nereye yaz */
+    int nreaders, nwriters;
+    struct semaphore sem;
+    struct cdev cdev;
+};
+\end{lstlisting}
+
+\textbf{İki ayrı wait queue}: \texttt{inq} (okuyucular veri bekler),
+\texttt{outq} (yazıcılar yer bekler) -- kuralda geçen "farklı işlemler
+için farklı kuyruk" ilkesinin somut hali.
+
+\begin{lstlisting}
+static ssize_t scull_p_read (struct file *filp, char __user *buf,
+                              size_t count, loff_t *f_pos)
+{
+    struct scull_pipe *dev = filp->private_data;
+    if (down_interruptible(&dev->sem))
+        return -ERESTARTSYS;
+
+    while (dev->rp == dev->wp) { /* okunacak bir sey yok */
+        up(&dev->sem);           /* KILIDI BIRAK -- yoksa yazicilar bizi hic uyandiramaz */
+        if (filp->f_flags & O_NONBLOCK)
+            return -EAGAIN;
+        if (wait_event_interruptible(dev->inq, (dev->rp != dev->wp)))
+            return -ERESTARTSYS;
+        if (down_interruptible(&dev->sem))  /* uyandik: kilidi TEKRAR al */
+            return -ERESTARTSYS;
+        /* dongu basina donup kosulu YENIDEN kontrol et */
+    }
+    /* ...veriyi kopyala, rp'yi ilerlet... */
+    up(&dev->sem);
+    wake_up_interruptible(&dev->outq);  /* yazicilari uyandir */
+    return count;
+}
+\end{lstlisting}
+
+\begin{notkutu}{Bu kodun öğrettiği en önemli desen}
+Tampon boşsa, semafor \textbf{uyumadan önce bırakılır} -- kitabın
+kendi ifadesiyle: "eğer onu tutarken uyusaydık, hiçbir yazıcının bizi
+uyandırma fırsatı olmazdı" (doğrudan self-deadlock). Uyandıktan sonra:
+sinyal geldiyse \texttt{-ERESTARTSYS}; değilse semafor
+\textbf{yeniden alınır} ve \texttt{while} döngüsü koşulu \textbf{yeniden
+test eder} -- çünkü uyanman veri orada olduğu anlamına gelmez, başka
+bir okuyucu senden önce veriyi almış olabilir. Bu, Kural 2'nin (asla
+uyanma sonrası varsayım yapma) birebir kod haline gelmiş hali.
+\end{notkutu}
+
+\subsubsection{Elle Uyuma Mekaniği (wait\_event'in altında ne oluyor)}
+
+\begin{enumerate}[leftmargin=1.2cm]
+  \item Bir \texttt{wait\_queue\_t} girdisi oluşturulup kuyruğa eklenir.
+  \item Process durumu değiştirilir: \texttt{TASK\_RUNNING} (çalışabilir),
+  \texttt{TASK\_INTERRUPTIBLE}/\texttt{TASK\_UNINTERRUPTIBLE}
+  (uyuyor). \textbf{Sadece durumu değiştirmek process'i uyutmaz} --
+  zamanlayıcıya nasıl davranacağını söyler, henüz CPU bırakılmamıştır.
+  \item \textbf{Kritik desen}: durum ayarlandıktan hemen sonra, ama
+  \texttt{schedule()} çağrılmadan önce koşul tekrar kontrol edilir:
+  \begin{lstlisting}
+if (!condition)
+    schedule();
+  \end{lstlisting}
+  Bu, olayın \emph{ne zaman} gerçekleştiğine bakılmaksızın doğru
+  çalışır: koşul durum ayarlanmadan \textbf{önce} doğru olduysa, bu
+  kontrolde yakalanır (uyumadan atlanır); \textbf{sonra} gerçekleşirse,
+  process zaten çalıştırılabilir yapılmıştır.
+  \item \texttt{schedule()} -- zamanlayıcıyı çağırır, CPU'yu bırakır.
+\end{enumerate}
+
+\begin{notkutu}{Tarihi bir uyarı: sleep\_on kullanma}
+\texttt{sleep\_on()}/\texttt{interruptible\_sleep\_on()} kesinlikle
+\textbf{kullanımdan kaldırılmıştır} (deprecated) -- race condition'a
+karşı \textbf{hiçbir koruma sağlamazlar}: koşulu kontrol etmekle
+gerçekten uyumak arasında her zaman bir pencere vardır, ve o pencerede
+gelen bir uyandırma kaybolur. Kitap: "\texttt{sleep\_on} çağıran kod
+asla tam olarak güvenli değildir."
+\end{notkutu}
+
+\subsection{poll ve select}
+
+Bir process'in bloklamadan "okuyabilir miyim / yazabilir miyim"
+sorabilmesini sağlayan mekanizma. Tek bir sürücü metoduyla desteklenir:
+
+\begin{lstlisting}
+unsigned int (*poll) (struct file *filp, poll_table *wait);
+\end{lstlisting}
+
+İki görevi vardır: (1) \texttt{poll\_wait()}'i durumdaki değişikliği
+gösterebilecek her wait queue için çağırmak, (2) hangi işlemlerin
+\textbf{bloklamadan} tamamlanabileceğini gösteren bir bit maskesi
+döndürmek (\texttt{POLLIN|POLLRDNORM} okunabilir,
+\texttt{POLLOUT|POLLWRNORM} yazılabilir, \texttt{POLLHUP} EOF,
+\texttt{POLLERR} hata).
+
+\begin{lstlisting}
+static unsigned int scull_p_poll(struct file *filp, poll_table *wait)
+{
+    struct scull_pipe *dev = filp->private_data;
+    unsigned int mask = 0;
+
+    down(&dev->sem);
+    poll_wait(filp, &dev->inq,  wait);
+    poll_wait(filp, &dev->outq, wait);
+    if (dev->rp != dev->wp)
+        mask |= POLLIN | POLLRDNORM;
+    if (spacefree(dev))
+        mask |= POLLOUT | POLLWRNORM;
+    up(&dev->sem);
+    return mask;
+}
+\end{lstlisting}
+
+\begin{notkutu}{write asla veri iletimini beklemek için bloklamamalı}
+Kitabın vurguladığı önemli bir kural: uygulamalar \texttt{select}'i
+tam olarak "bu \texttt{write} bloklayacak mı" sorusuna cevap almak
+için kullanır -- eğer \texttt{poll} yazılabilir dediyse,
+\texttt{write} \textbf{gerçekten} bloklamamalıdır (\texttt{O\_NONBLOCK}
+ayarlı olmasa bile). Verinin fiziksel olarak iletildiğinden emin olmak
+isteyen bir uygulama bunun yerine \texttt{.fsync} kullanmalıdır.
+\end{notkutu}
+
+\subsection{Asenkron Bildirim (fasync / SIGIO)}
+
+Kullanıcı tarafı iki adımlı bir \texttt{fcntl} anlaşmasıdır:
+\begin{lstlisting}
+fcntl(fd, F_SETOWN, getpid());              /* 1. kimi bilgilendirecegini soyle */
+fcntl(fd, F_SETFL, fcntl(fd,F_GETFL)|FASYNC); /* 2. bildirimi ac */
+\end{lstlisting}
+Ardından kernel, dosyada yeni veri geldiğinde sahibe \texttt{SIGIO}
+sinyali gönderir. Sürücü tarafında hazır yardımcı fonksiyonlar
+kullanılır:
+\begin{lstlisting}
+int  fasync_helper(int fd, struct file *filp, int mode, struct fasync_struct **fa);
+void kill_fasync(struct fasync_struct **fa, int sig, int band);
+\end{lstlisting}
+scull örneği:
+\begin{lstlisting}
+static int scull_p_fasync(int fd, struct file *filp, int mode)
+{
+    struct scull_pipe *dev = filp->private_data;
+    return fasync_helper(fd, filp, mode, &dev->async_queue);
+}
+/* write icinde, yeni veri geldiginde: */
+if (dev->async_queue)
+    kill_fasync(&dev->async_queue, SIGIO, POLL_IN);
+\end{lstlisting}
+
+\begin{notkutu}{Kolayca unutulan temizlik adımı}
+\texttt{.fasync} metodu, dosya \textbf{kapanırken de} çağrılmalıdır
+(genelde \texttt{.release} içinde, \texttt{scull\_p\_fasync(-1, filp,
+0);} gibi) -- yoksa kapanmış bir \texttt{filp} bildirim listesinde
+asılı kalır.
+\end{notkutu}
+
+\subsection{Cihaz\i\ Aramaya Kapatmak: nonseekable\_open}
+
+\texttt{.llseek} \texttt{NULL} bırakılırsa, kernelin \textbf{varsayılan
+davranışı yine de aramaya (seek) izin verir} -- yani seri port gibi
+gerçek bir veri \emph{akışı} sunan (veri \emph{alanı} değil) bir cihaz
+için, aramayı devre dışı bırakmak istiyorsan \texttt{.llseek}'i boş
+bırakmak \textbf{yetmez}. Açıkça reddetmek gerekir:
+
+\begin{lstlisting}
+int nonseekable_open(struct inode *inode, struct file *filp);
+/* .open icinde cagir, ve fops'ta: */
+.llseek = no_llseek,
+\end{lstlisting}
+
+scull, gerçek bir veri alanı olduğu için kendi \texttt{.llseek}'ini
+uygular -- \texttt{SEEK\_END} durumunda cihazın güncel boyutunu
+(\texttt{dev->size}) kullanarak yeni konumu hesaplar.
+
+\subsection{Cihaz Dosyas\i\ \"Uzerinde Eri\c{s}im Kontrol\"u}
+
+Dosya izin bitleri \textbf{kimin} bir cihazı açabileceğini kısıtlar --
+ama bazen yetkili kullanıcılar arasında bile \textbf{aynı anda sadece
+biri} açık tutabilmelidir. Kitap dört farklı politikayı ayrı scull
+varyantları olarak gösterir:
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \textbf{scullsingle} -- \texttt{atomic\_t} sayaç ile
+  ("brute-force," kitabın kendi tabiriyle "genelde kaçınılması
+  gereken" bir yaklaşım -- meşru eşzamanlı kullanım desenlerini
+  (örn. bir okuma-durumu process'i + bir yazma-verisi process'i)
+  engeller):
+  \begin{lstlisting}
+static atomic_t scull_s_available = ATOMIC_INIT(1);
+if (! atomic_dec_and_test (&scull_s_available)) {
+    atomic_inc(&scull_s_available);
+    return -EBUSY;
+}
+  \end{lstlisting}
+  \item \textbf{sculluid} -- sadece \textbf{tek bir kullanıcı}
+  (birden fazla process'e izin vererek) açabilir; spinlock ile
+  korunan sayaç + sahip uid:
+  \begin{lstlisting}
+spin_lock(&scull_u_lock);
+if (scull_u_count &&
+        (scull_u_owner != current->uid) &&
+        (scull_u_owner != current->euid) &&
+        !capable(CAP_DAC_OVERRIDE)) {
+    spin_unlock(&scull_u_lock);
+    return -EBUSY;   /* -EPERM kullaniciyi yanlis yone yonlendirir */
+}
+  \end{lstlisting}
+  \begin{notkutu}{-EBUSY neden -EPERM değil? (bilinçli UX kararı)}
+  Kitap açıkça bunun kasıtlı olduğunu söylüyor: "kullanıcılar
+  'Permission denied' mesajını dosya izin/sahiplik bitlerini kontrol
+  etme daveti olarak yorumlar" -- oysa asıl sorun bu değildir.
+  "Device busy" doğru şekilde "zaten kullanan bir process ara"
+  fikrini verir.
+  \end{notkutu}
+  \item \textbf{scullwuid} -- sculluid gibi ama \texttt{-EBUSY}
+  yerine bir wait queue'da \textbf{bekler}; cron gibi arka plan
+  görevleri için etkileşimli redden daha uygun olabilir. Kitap
+  gerçek dünya örneği verir: Linux teyp sürücüsü, aynı fiziksel
+  cihaz için \textbf{farklı davranışlar} sunan birden fazla cihaz
+  düğümü (device node) kullanır -- bloklama-vs-reddetme gibi uyumsuz
+  politikaların her ikisine de ihtiyaç varsa, çözüm genelde tek bir
+  cihazı iki politikayla zorlamak değil, \textbf{iki ayrı cihaz
+  düğümü} sunmaktır.
+  \item \textbf{scullpriv} -- her açan process'e (kontrol eden
+  terminaline göre anahtarlanan) \textbf{ayrı bir sanal kopya}
+  sunar -- sadece scull gibi saf yazılım cihazlarında mümkün. Anahtar
+  olarak terminal yerine \texttt{uid} kullanılsaydı, her kullanıcıya
+  özel bir sanal cihaz elde edilirdi -- bu tamamen bir politika
+  seçimidir.
+\end{itemize}
+
+\subsection*{B\"ol\"um 6 -- \"On Plana \c{C}\i kan Uyar\i lar}
+\begin{enumerate}[leftmargin=1.2cm]
+  \item ioctl komut numaraları asla küçük ardışık tam sayılar
+  olmamalı -- type/number/direction/size kodlamasına uyulmalı.
+  \item \texttt{access\_ok}'un \texttt{VERIFY\_READ}/\texttt{VERIFY\_WRITE}
+  anlamı, ioctl'in kendi yön bitlerine göre \textbf{tersine} döner.
+  \item \texttt{\_\_put\_user}/\texttt{\_\_get\_user} sadece
+  \texttt{access\_ok} ile önceden doğrulanmış adreslerde kullanılmalı.
+  \item Check-then-sleep race'i: koşulu kontrol edip sonra uyumak iki
+  \textbf{ayrı, senkronize olmayan} adımsa, arada gelen bir uyandırma
+  sonsuza kadar kaybolabilir -- \texttt{wait\_event*} bunu içeride
+  otomatik çözer, elle kod yazıyorsan sen çözmelisin.
+  \item Beklemeden önce, uyandırıcı tarafın ihtiyaç duyduğu kilidi
+  \textbf{bırak}.
+  \item Sinyalle kesilme her zaman \texttt{-ERESTARTSYS} ile
+  bildirilmeli.
+  \item \texttt{.llseek}'i boş bırakmak aramayı devre dışı
+  \textbf{bırakmaz} -- aramayı reddetmek için açıkça
+  \texttt{nonseekable\_open} + \texttt{no\_llseek} gerekir.
+\end{enumerate}
+
+\newpage
+
+%=================================================================
+\section{Bellek Ay\i rma}
+\label{sec:bolum8}
+%=================================================================
+
+Senin \texttt{ahmet.c}'in şu an \texttt{static char buffer[1024]} ile
+\textbf{derleme-zamanı} sabit bir alan kullanıyor. Bu bölüm, kernel'in
+\textbf{çalışma-zamanında} bellek istemenin kaç farklı yolu olduğunu ve
+hangisini ne zaman seçmen gerektiğini anlatır.
+
+\subsection{kmalloc: Kernel'in malloc'u, Ama Farklı Kurallarla}
+
+\texttt{kmalloc(size\_t size, int flags)} çağrısı \textbf{fiziksel
+olarak bitişik} (contiguous) bellek döndürür -- ve \textbf{önceki
+içeriğini temizlemez}; user space'e gönderilecek ya da cihaza
+yazılacaksa elle sıfırlanmalı (aksi halde önceki kernel verisi sızabilir).
+
+En önemli iki bayrak, ne zaman hangisinin kullanılacağı konusunda net
+bir kural taşır:
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \textbf{\texttt{GFP\_KERNEL}} -- normal, process bağlamındaki
+  (process context) çağrılar için. Bellek azsa \textbf{uyuyabilir}
+  (process'i bekletir). Bu yüzden onu çağıran fonksiyon
+  \textbf{reentrant olmalı ve atomik bağlamda çalışmamalıdır.}
+  \item \textbf{\texttt{GFP\_ATOMIC}} -- process bağlamı
+  \textbf{dışında} (kesme işleyicisi, tasklet, timer) zorunludur.
+  \textbf{Asla uyumaz}; kernel bunun için ayrı bir acil-durum
+  rezervi tutar, o da tükenirse ayırma \textbf{başarısız olur}
+  (ama hiç uyumaz).
+\end{itemize}
+
+\begin{notkutu}{En kritik kural}
+Kesme bağlamında (ya da Bölüm 5'te öğrendiğin bir spinlock tutarken)
+\texttt{GFP\_KERNEL} kullanmak ciddi bir hatadır -- kod uyuyabilir,
+ve zaten uyuyamayacağın bir yerdesin. Doğru bayrak
+\texttt{GFP\_ATOMIC}'tir.
+\end{notkutu}
+
+\textbf{Boyut sınırı}: kmalloc, önceden tanımlı sabit boyut sınıflarından
+(2'nin katları) bellek verir -- istediğinden biraz \textbf{fazlasını}
+alabilirsin (en kötü ihtimalle 2 katı). Taşınabilir kod
+\textbf{128 KB}'tan fazlasını kmalloc ile isteyemez -- sistem
+çalıştıkça bitişik büyük blok bulmak zorlaşır (parçalanma/fragmentation).
+
+\subsection{Slab Cache: Ayn\i\ Boyuttaki Nesneleri S\i k S\i k Ay\i r\i p B\i rakanlar \.{I}\c{c}in}
+
+Bir sürücü \textbf{aynı boyutta} nesneleri sürekli ayırıp serbest
+bırakıyorsa (USB ve SCSI sürücüleri gibi), kmalloc yerine
+\texttt{kmem\_cache\_create()} ile kendi havuzunu (lookaside cache)
+oluşturabilir -- \texttt{kmem\_cache\_alloc}/\texttt{kmem\_cache\_free}
+ile ayırıp bırakır, \texttt{kmem\_cache\_destroy} ile kapatır (sadece
+tüm nesneler geri döndüyse başarılı olur -- başarısız dönüş, bir
+sızıntı olduğunun işaretidir). Kitabın \texttt{scullc} varyantı bunu
+gösterir: kmalloc yerine cache kullanmak hız değil, \textbf{daha
+öngörülebilir/verimli bellek kullanımı} sağlar.
+
+\subsection{Sayfa Bazl\i\ Ayirma ve vmalloc: Farkl\i\ İhtiyaçlar \.{I}\c{c}in Farkl\i\ Ara\c{c}lar}
+
+\texttt{\_\_get\_free\_pages()} ailesi, kmalloc'un aksine tam sayfa(lar)
+ister -- büyük parçalar için kmalloc'tan daha verimlidir (kmalloc'un
+öngörülemeyen fazlalığı yoktur).
+
+\begin{notkutu}{vmalloc ile kmalloc arasındaki en önemli fark}
+\texttt{vmalloc()}'in döndürdüğü bellek \textbf{sanal adres uzayında
+bitişiktir} ama \textbf{fiziksel bellekte bitişik olmak zorunda
+değildir} (her sayfa ayrı ayrı alınıp sanal olarak yan yana
+haritalanır). \texttt{kmalloc} ikisini de garanti eder. \textbf{Donanım
+DMA yapacaksa \texttt{vmalloc} kullanılamaz} -- donanım fiziksel
+adrese ihtiyaç duyar, vmalloc'un sanal adresi donanım için anlamsızdır.
+Kitap açıkça caydırıyor: "çoğu durumda vmalloc kullanımı önerilmez."
+Uygun olduğu nadir durum: yalnızca yazılımda var olan, büyük, ardışık
+bir tampon (örn. modül yükleme mekanizmasının kendisi, modül kodunu
+yüklerken vmalloc kullanır).
+\end{notkutu}
+
+\subsection{CPU-Ba\c{s}\i na De\u{g}i\c{s}kenler: Kilitsiz H\i z}
+
+2.6 kernel'in bir özelliği: \texttt{DEFINE\_PER\_CPU(tip, isim)} ile
+tanımlanan bir değişkenin \textbf{her işlemci kendi kopyasına} sahip
+olur -- kilitleme gerekmeden hızlı sayaç/istatistik tutmak için
+idealdir (ağ paket sayaçları gibi).
+
+\begin{notkutu}{get\_cpu\_var / put\_cpu\_var eşleşmesi zorunlu}
+\texttt{get\_cpu\_var(isim)} preemption'ı (önceliklenmeyi) devre dışı
+bırakır ve o CPU'nun kopyasına erişim verir; \texttt{put\_cpu\_var(isim)}
+\textbf{bunu tekrar etkinleştirir}. İkisi her zaman eşleşmelidir --
+\texttt{put\_cpu\_var}'ı atlamak preemption'ı kalıcı olarak kapalı
+bırakır.
+\end{notkutu}
+
+\subsection{Büyük Tamponlar: Neden Kaçınmalı}
+
+Kitap açık bir tavsiye veriyor: büyük, bitişik bellek ayırmaları
+\textbf{zamanla arızaya eğilimlidir} (sistem çalıştıkça bellek
+parçalanır). Gerçekten büyük bir tampon gerekiyorsa, en iyi çözüm
+genelde tek bir dev blok istemek yerine \textbf{scatter/gather}
+işlemleridir (Bölüm 15'in konusu, bu belgenin kapsamı dışında).
+
+\begin{ahmetkutu}
+Bu bölüm, README'deki "sırada" listesindeki maddeyi netleştiriyor:
+\texttt{ahmet\_init} içinde \texttt{buffer = kmalloc(buffer\_size,
+GFP\_KERNEL);} ile dinamik ayırıp \texttt{ahmet\_exit}'te
+\texttt{kfree(buffer);} ile serbest bırakmak -- 1024 byte gibi küçük
+bir tampon için pratikte fark yaratmaz, ama \textbf{doğru API'yi doğru
+yerde kullanmayı} öğrenmiş olursun: sürücün process bağlamında
+(\texttt{ahmet\_init}, bir modül yükleme işlemidir) çalıştığı için
+burada \texttt{GFP\_KERNEL} doğru seçimdir.
+\end{ahmetkutu}
+
+\newpage
+
+%=================================================================
+\section{Kesme (Interrupt) Y\"onetimi}
+\label{sec:bolum10}
+%=================================================================
+
+\begin{notkutu}{Neden bu bölüm senin için hemen uygulanabilir değil, ama önemli}
+\texttt{ahmet.c} gerçek donanıma bağlı değil -- kesme (interrupt)
+üretmiyor. Ama gömülü sistem stajında er ya da geç gerçek bir
+donanımla (bir buton, bir sensör, bir seri port çipi) çalışacaksın,
+ve o donanım seni \textbf{kesme ile} uyaracak. Bu bölümü şimdi
+kavramsal olarak anlamak, o günü daha rahat karşılamanı sağlar.
+\end{notkutu}
+
+\subsection{Kesme Neden Var: Polling'e Alternatif}
+
+Donanım, "bir şey oldu" demek için CPU'yu sürekli yokladırmak
+(polling -- boşa CPU harcar) yerine bir \textbf{kesme sinyali}
+gönderir; CPU o an ne yapıyorsa bırakıp senin kayıtlı fonksiyonunu
+çalıştırır. Kesme hatları (IRQ) sınırlı bir kaynaktır -- kullanmadan
+önce talep edilmeli:
+
+\begin{lstlisting}
+int request_irq(unsigned int irq, irq_handler_t handler,
+                 unsigned long flags, const char *dev_name, void *dev_id);
+void free_irq(unsigned int irq, void *dev_id);
+\end{lstlisting}
+
+\begin{notkutu}{Kernel sürümü uyarısı: bu bölüm de eski API kullanıyor}
+Kitaptaki \texttt{handler} imzası \texttt{struct pt\_regs *regs} adlı
+eski, artık kaldırılmış bir üçüncü parametre içerir -- modern
+kernellerde yok. Bayraklar da \texttt{SA\_INTERRUPT}/\texttt{SA\_SHIRQ}
+olarak geçer; bunlar modern kernellerde \texttt{IRQF\_SHARED} gibi
+isimlere dönüştü (\texttt{SA\_INTERRUPT}'ın karşılığı olan "fast
+handler" kavramı tamamen kaldırıldı). Kavramlar aynı, sadece isimler
+değişti.
+\end{notkutu}
+
+\texttt{dev\_id}'nin iki görevi vardır: (1) \texttt{free\_irq}'nun
+\textbf{hangi} kaydı sileceğini bilmesi, (2) \textbf{paylaşılan}
+bir IRQ hattında, kesme geldiğinde hangi cihaz örneğinin ilgilendiğini
+ayırt etmek. Bir handler'ın dönüş değeri: \texttt{IRQ\_HANDLED}
+(cihazım gerçekten kesme üretti, ilgilendim) ya da \texttt{IRQ\_NONE}
+(bu kesme benim cihazımdan gelmedi).
+
+\subsection{Handler Kurallar\i : Neden Bu Kadar K\i s\i tl\i}
+
+Bir kesme işleyicisi, Bölüm 5'teki spinlock kurallarının en katı
+haliyle çalışır: \textbf{user space'e erişemez, uyuyamaz,
+\texttt{schedule()} çağıramaz}. Bu yüzden handler'ın işi minimal
+tutulmalı -- donanımdan gelen veriyi bir tampona kaydetmek, gerekiyorsa
+donanıma "aldım" demek, ve ağır işi \textbf{ertelemek}.
+
+\begin{notkutu}{Top half / bottom half -- Bölüm 7'nin burada karşılığı}
+Kayıtlı handler'ın kendisi \textbf{top half}'tir -- hızlı olmalı.
+Asıl (uzun sürebilecek) iş, Bölüm 7'de gördüğün \textbf{tasklet}
+ya da \textbf{workqueue} ile \textbf{bottom half}'e ertelenir. Tipik
+akış: top half veriyi kapıp bir bayrak/kuyruk günceller ve
+\texttt{tasklet\_schedule()}/\texttt{schedule\_work()} çağırıp
+hemen döner; bottom half asıl işi (biçimlendirme, kopyalama) daha
+"güvenli" bir zamanda, kesmeler açıkken yapar.
+\end{notkutu}
+
+\subsection{Kesme ile Bloklayan I/O'nun Bulu\c{s}tu\u{g}u Yer}
+
+Bölüm 6'da öğrendiğin bloklayan \texttt{read}'in gerçek dünyadaki
+karşılığı tam olarak budur: veri yokken process
+\texttt{wait\_event\_interruptible} ile uyur; veri geldiğinde
+\textbf{kesme işleyicisi} minimum işi yapar ve
+\texttt{wake\_up\_interruptible()}'ı çağırarak bekleyen process'i
+uyandırır. Yani Bölüm 6'daki "kim uyandıracak?" sorusunun donanım
+dünyasındaki cevabı: \textbf{kesme işleyicisi}.
+
+\subsection{Payla\c{s}\i lan Kesmeler}
+
+Birden fazla cihaz aynı IRQ hattını paylaşabilir
+(\texttt{IRQF\_SHARED}/\texttt{SA\_SHIRQ}). Kesme geldiğinde \textbf{o
+hatta kayıtlı tüm handler'lar çağrılır} -- bu yüzden her handler önce
+\textbf{kendi cihazının} gerçekten kesme ürettiğini (bir durum
+register'ını okuyarak) kontrol etmeli, değilse hemen
+\texttt{IRQ\_NONE} dönmelidir. \texttt{dev\_id} bu yüzden paylaşımlı
+hatlarda \textbf{asla NULL olamaz} -- kernel onu handler'ları
+birbirinden ayırt etmek için kullanır.
+
+\begin{notkutu}{Kayıp kesmeler gerçek bir donanım vakasıdır}
+Kitabın açık ifadesi: "Donanımla uğraşmanın gerçeği şu ki, ara sıra
+cihazdan bir kesmeyi kaçırabilirsin. Bu olduğunda, sürücünün sistem
+yeniden başlatılana kadar sonsuza dek durmasını \textbf{istemezsin}."
+Bu yüzden gerçek sürücüler genelde bir "kaçırılan kesme" emniyet
+zamanlayıcısı (watchdog timer) kurar -- zamanlayıcı, beklenen kesme
+gelmediğinde handler'ı elle tetikler.
+\end{notkutu}
+
+\subsection*{B\"ol\"um 10 -- \"On Plana \c{C}\i kan Uyar\i lar}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Modül kaldırılırken \texttt{free\_irq()} çağrılmazsa, bir
+  sonraki kesme artık geçersiz/kaldırılmış koda işaret eder -- klasik
+  bir use-after-free türü hata.
+  \item Handler'da fazla iş yapmak, sadece o cihazı değil, sistemin
+  genel tepki süresini bozar -- ağır iş her zaman ertelenmeli.
+  \item Paylaşımlı bir hatta \texttt{enable\_irq}/\texttt{disable\_irq}
+  çağırmak \textbf{diğer cihazları} da etkiler -- yapılmamalı.
+  \item Handler ile process-bağlamındaki kod aynı veriyi paylaşıyorsa,
+  process tarafı \texttt{spin\_lock\_irqsave} kullanmalı (Bölüm 5) --
+  aksi halde aynı CPU'da kendini kilitleyebilirsin.
+\end{itemize}
+
+\newpage
+
+%=================================================================
+\section{The Linux Device Model (Ayg\i t Modeli)}
+\label{sec:bolum14}
+%=================================================================
+
+\begin{notkutu}{Bu bölüm neden en doğrudan sana bağlı olan bölüm}
+Sen zaten \texttt{class\_create()} ve \texttt{device\_create()}
+kullanıyorsun -- \texttt{/dev/ahmet}'in otomatik oluşmasını sağlayan
+mekanizma. Bu bölüm o "sihrin" perde arkasında ne olduğunu açıklıyor.
+\end{notkutu}
+
+\subsection{kobject: Her \c{S}eyin Alt\i nda Yatan Ortak \.{I}skelet}
+
+Kernel, cihaz modelindeki hemen her nesneyi (\texttt{struct cdev} dahil
+-- Bölüm 3'te gördüğün!) bir \texttt{struct kobject} \textbf{gömerek}
+inşa eder. \texttt{kobject}'in tek işi üç şeydir: \textbf{referans
+sayımı} (kaç yerin bu nesneye ihtiyacı var), \textbf{sysfs'te bir
+dizin olarak görünme}, ve \textbf{hotplug olayı üretme}.
+
+\begin{notkutu}{En kritik kural: bir kobject içeren struct'ı asla doğrudan kfree etme}
+Bir kobject'in referans sayısı, senin kontrolünde olmayan sebeplerle
+(örn. bir user-space process'in sysfs'teki bir dosyayı açık tutması)
+sıfırdan büyük kalabilir. Bu yüzden kernel, "bu nesneyi sen değil,
+\textbf{ben (kernel) son referans bittiğinde} sana haber vereceğim"
+der -- bu haber verme, \texttt{kobj\_type}'a bağlı bir \texttt{release}
+callback'idir. \textbf{Her kobject içeren struct'ın bir release
+fonksiyonu olmak zorundadır}; \texttt{struct device} için bu yoksa
+kernel "korkutucu şikayetler" basar. Gerçek bellek serbest bırakma
+(\texttt{kfree}) sadece bu callback'in içinde yapılmalı --
+\texttt{kobject\_put()} referans sayısını sıfıra indirdiğinde otomatik
+tetiklenir.
+\end{notkutu}
+
+\subsection{sysfs: Neden Her kobject Bir Dizindir}
+
+\texttt{kobject}'in sistemdeki konumu (\texttt{parent} işaretçisi
+üzerinden) doğrudan \texttt{/sys} altında bir \textbf{dizine} eşlenir.
+Bir kobject'in sunduğu her \textbf{attribute} (özellik), o dizinde bir
+\textbf{dosya} olarak görünür -- \texttt{show}/\texttt{store}
+fonksiyonlarıyla okunur/yazılır. Kitabın vurguladığı tasarım kuralı:
+\textbf{"her dosya tek bir, insan tarafından okunabilir değer
+içermeli"} -- büyük/karmaşık veri birden fazla dosyaya bölünmeli.
+
+\subsection{Hotplug Olay\i : udev'in /dev D\"ug\"um\"unu Nas\i l Olu\c{s}turdu\u{g}u}
+
+Bir kobject sisteme eklendiğinde/çıkarıldığında kernel bir
+\textbf{hotplug olayı} (uevent) üretir -- bu, user-space'teki
+\textbf{udev}'i tetikler. \textbf{Mekanizmanın tam olarak senin
+\texttt{/dev/ahmet}'inle ilgisi burada}: udev, bildirim aldığında
+\texttt{/sys/class/...} ağacında \texttt{dev} adlı bir dosya arar --
+bu dosya major:minor numarasını içerir. \textbf{Bir sürücünün udev
+için yapması gereken tek şey, kontrol ettiği cihazların major/minor
+numaralarını sysfs üzerinden dışa açmaktır} -- \texttt{class\_create}
++ \texttt{device\_create} çağrıların tam olarak bunu yapıyor: bir
+sınıf (\texttt{/sys/class/ahmet\_class}) oluşturup, altına \texttt{dev}
+dosyasını içeren bir cihaz girdisi ekliyor.
+
+\subsection{Bus $\to$ Device $\to$ Driver: PCI/USB'de G\"ord\"u\u{g}\"un\"un Genelle\c{s}mi\c{s} Hali}
+
+Bir \textbf{bus} (\texttt{struct bus\_type}), üzerindeki cihazları ve
+sürücüleri iki kset olarak tutar; bir \texttt{match()} fonksiyonu
+hangi sürücünün hangi cihaza uyduğuna karar verir. Eşleşme bulunduğunda
+sürücünün \texttt{probe()} fonksiyonu çağrılır -- Bölüm 12/13'te PCI ve
+USB için gördüğün "cihaz tak, doğru sürücü otomatik eşleşsin" deseninin
+\textbf{soyut, genel çerçevesi} budur.
+
+\subsection{class: class\_create'in ge\c{c}mi\c{s}i ve senin kodunla fark\i}
+
+\begin{ahmetkutu}
+Bu bölümdeki en doğrudan sana ait bulgu: \textbf{kitabın bu baskısı
+\texttt{class\_create()} diye bir fonksiyon hiç kullanmıyor} --
+onun yerine (2.6.10 döneminde) \texttt{class\_simple\_create(struct
+module *owner, char *name)} ve \texttt{class\_simple\_device\_add(...)}
+kullanıyor. API zaman içinde şöyle evrildi:
+\begin{center}
+\texttt{class\_simple\_create(owner, name)} $\to$
+\texttt{class\_create(owner, name)} $\to$
+\texttt{class\_create(name)}
+\end{center}
+Senin kodunda \texttt{class\_create("ahmet\_class")} -- \textbf{tek
+argümanlı} -- kullanılıyor, yani sen kitaptan \textbf{iki nesil sonraki}
+bir API'deyken (\texttt{owner} parametresi tamamen kaldırılmış).
+İsimler değişse de \textbf{mekanizma birebir aynı}: sınıf oluştur
+$\to$ \texttt{/sys/class/<isim>} dizini oluşsun $\to$ cihaz ekle
+$\to$ \texttt{dev} dosyası ve hotplug olayı üretilsin $\to$ udev
+\texttt{/dev} düğümünü yaratsın.
+\end{ahmetkutu}
+
+\subsection{Firmware Y\"ukleme (K\i sa Not)}
+
+Donanımın çalışabilmesi için önce bir firmware dosyası yüklenmesi
+gerekiyorsa, kitap firmware'i \textbf{kaynak koduna gömmeyi} açıkça
+yanlış bulur (lisans sorunu + güncelleme zorluğu). Doğru yol:
+\texttt{request\_firmware()} ile user space'ten çalışma zamanında
+istemek -- bu çağrı \textbf{uyuyabilir} (process bağlamı gerektirir),
+uyuyamayan bağlamlar için \texttt{request\_firmware\_nowait()}
+(callback tabanlı) vardır.
+
+\subsection*{B\"ol\"um 14 -- \"On Plana \c{C}\i kan Uyar\i lar}
+\begin{itemize}[leftmargin=1.2cm]
+  \item Bir kobject içeren struct'ı asla doğrudan \texttt{kfree} etme
+  -- sadece \texttt{release} callback'i içinde, \texttt{kobject\_put}
+  tetiklediğinde.
+  \item sysfs dosyaları "her dosyada tek değer" kuralına uymalı.
+  \item \texttt{show}/\texttt{store} fonksiyonları user space'ten gelen
+  veriyi asla güvenilir kabul etmemeli -- geçersizse negatif hata dön.
+  \item Kitaptaki \texttt{class\_simple\_*} isimlerini gördüğünde
+  paniklemeyin -- bugünkü \texttt{class\_create}/\texttt{device\_create}'in
+  doğrudan atalarıdır, aynı mekanizmayı farklı isimle sunar.
+  \item Firmware'i asla kaynak koduna gömme -- hem lisans hem
+  güncellenebilirlik sorunu yaratır.
+\end{itemize}
+
+\newpage
+
+%=================================================================
+\section*{Sonu\c{c}: Kitaptan ahmet.c'ye D\"onen Bir Yol Haritas\i}
+\addcontentsline{toc}{section}{Sonu\c{c}: Kitaptan ahmet.c'ye D\"onen Bir Yol Haritas\i}
+%=================================================================
+
+Bu sekiz bölümü okuduktan sonra, kendi sürücünü aşamalı olarak
+geliştirmek için önerilen sıra -- her adım tek bir bölümün tek bir
+kavramına karşılık geliyor, yani her adımı bitirdiğinde \emph{hangi
+bölümü uyguladığını} tam olarak bileceksin:
+
+\begin{enumerate}[leftmargin=1.2cm]
+  \item \textbf{(Bölüm 5)} \texttt{ahmet\_write}/\texttt{ahmet\_read}
+  içine bir \texttt{struct mutex} ekle (modern karşılığı --
+  \texttt{DECLARE\_MUTEX} değil). \texttt{ahmet\_open}'da değil,
+  modülün \texttt{ahmet\_init}'inde, cihaz sisteme açılmadan
+  \textbf{önce} ilklendir -- Bölüm 5'teki sıralama kuralını birebir
+  uygula.
+  \item \textbf{(Bölüm 3)} \texttt{ahmet\_write}'ı \texttt{*offset}'i
+  kullanacak şekilde düzelt -- \texttt{scull\_write}'ın algoritmasını
+  (kırpma + kopyalama + \texttt{*offset} güncelleme) birebir örnek al.
+  \item \textbf{(Bölüm 6)} Basit bir \texttt{ioctl} komutu ekle
+  (örneğin \texttt{AHMET\_IOCRESET} -- tamponu sıfırlayan, argümansız
+  bir \texttt{\_IO} komutu). Bu, hem komut kodlamasını hem
+  \texttt{.ioctl}/\texttt{.unlocked\_ioctl} metodunu eklemeyi
+  gerektirecek.
+  \item \textbf{(Bölüm 6)} \texttt{ahmet\_read}'i, veri yokken
+  \texttt{wait\_event\_interruptible} ile bekleyecek şekilde
+  değiştir -- \texttt{scull\_p\_read}'in "kilidi bırak, bekle, kilidi
+  geri al, koşulu yeniden kontrol et" desenini uygula.
+  \item \textbf{(Bölüm 2 + 8)} \texttt{BUFFER\_SIZE}'ı bir
+  \texttt{module\_param}'a çevir, \texttt{kmalloc}/\texttt{kfree} ile
+  dinamik ayır -- \texttt{ahmet\_init} process bağlamında çalıştığı
+  için \texttt{GFP\_KERNEL} doğru bayraktır.
+  \item \textbf{(Bölüm 14)} \texttt{class\_create}/\texttt{device\_create}
+  çağrılarının kitaptaki \texttt{class\_simple\_create} ile aynı
+  mekanizma olduğunu bilerek kodunu tekrar oku -- sysfs'teki
+  \texttt{/sys/class/ahmet\_class/ahmet/dev} dosyasını
+  (\texttt{cat /sys/class/ahmet\_class/ahmet/dev}) inceleyip udev'in
+  bu dosyadan nasıl \texttt{/dev/ahmet}'i ürettiğini gözlemle.
+  \item \textbf{(Bölüm 10, ileri seviye)} Staj kapsamında gerçek bir
+  donanıma (GPIO, buton, sensör) bağlanırsan, \texttt{request\_irq}
+  ile bir kesme işleyicisi ekle; handler'da sadece minimum işi yap ve
+  Bölüm 6'daki \texttt{wait\_event\_interruptible} ile bloklanan bir
+  \texttt{read}'i \texttt{wake\_up\_interruptible} ile uyandır --
+  Bölüm 6 ve Bölüm 10'un birleştiği tam nokta budur.
+  \item \textbf{(Bölüm 4)} Her adımdan sonra \texttt{dmesg} çıktısını
+  ve gerekirse \texttt{strace}'i kullanarak davranışı doğrula --
+  özellikle \texttt{ioctl} ve bloklayan \texttt{read} eklemelerinde,
+  \texttt{strace} sana syscall seviyesinde tam olarak ne olduğunu
+  gösterecek.
+\end{enumerate}
+
+\begin{notkutu}{Son not}
+Bu belge kitabın yerini tutmaz -- burada anlatılan her kavramın
+arkasında kitapta çok daha fazla ayrıntı, şekil ve alternatif örnek
+var (özellikle \texttt{scullpipe}'ın tam kaynağı, \texttt{scullpriv}'in
+liste yönetimi, \texttt{lddbus} örneği gibi). Buradaki amaç, kitabı
+okurken hiçbir terimin ya da kod parçasının "havada kalmaması," ve
+okuduğun her şeyi kendi \texttt{ahmet.c}'ne bir sonraki adım olarak
+bağlayabilmendi. Yukarıdaki adımları sırayla uygularsan, staj sonunda
+elinde sadece "çalışan" değil, \emph{LDD3'ün sekiz bölümünün her
+birini bilinçli olarak uyguladığın} bir sürücü olacak.
+\end{notkutu}
+
+\end{document}

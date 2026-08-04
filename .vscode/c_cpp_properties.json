@@ -1,0 +1,25 @@
+{
+    "configurations": [
+        {
+            "name": "Linux Kernel",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/src/linux-headers-7.0.0-28-generic/include",
+                "/usr/src/linux-headers-7.0.0-28-generic/arch/x86/include",
+                "/usr/src/linux-headers-7.0.0-28-generic/include/uapi",
+                "/usr/src/linux-headers-7.0.0-28-generic/arch/x86/include/uapi",
+                "/usr/src/linux-headers-7.0.0-28-generic/arch/x86/include/generated"
+            ],
+            "defines": [
+                "__KERNEL__",
+                "MODULE",
+                "KBUILD_MODNAME=\"ahmet\"",
+                "__KERNEL_STRICT_NAMES"
+],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "gnu17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}
