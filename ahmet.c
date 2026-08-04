@@ -5,6 +5,7 @@
 #include <linux/uaccess.h>
 #include <linux/device.h>
 #include <linux/mutex.h>
+#include <linux/slab.h>
 
 #define BUFFER_SIZE 1024
 
@@ -13,8 +14,13 @@ static struct cdev ahmet_cdev;
 static struct class *ahmet_class;
 static struct device *ahmet_device;
 
-static char buffer[BUFFER_SIZE];
+//static char buffer[BUFFER_SIZE];
+
+
+static char *buffer;
 static size_t buffer_size = 0;
+static size_t buffer_capacity = 0;
+
 static struct mutex ahmet_mutex;
 
 static int ahmet_open(struct inode *inode, struct file *file)
@@ -70,8 +76,8 @@ static ssize_t ahmet_write(struct file *file,
 {
 mutex_lock(&ahmet_mutex);
 
-    if (len > BUFFER_SIZE)
-        len = BUFFER_SIZE;
+    if (len > buffer_capacity)
+        len = buffer_capacity;
 
     if (copy_from_user(buffer, buf, len))
     {
@@ -102,11 +108,22 @@ static int __init ahmet_init(void)
 
     mutex_init(&ahmet_mutex);
 
+    buffer = kmalloc(BUFFER_SIZE, GFP_KERNEL);
+
+    if(!buffer)
+    {
+        pr_err("Failed to allocate buffer\n");
+        
+        return -ENOMEM;
+    }
+
+    memset(buffer, 0, buffer_capacity);
+
     ret = alloc_chrdev_region(&dev_num, 0, 1, "ahmet");
     if (ret < 0)
     {
         pr_err("Failed to allocate device number\n");
-        return ret;
+        goto free_buffer;
     }
 
     pr_info("Major: %d Minor: %d\n",
@@ -165,6 +182,10 @@ static int __init ahmet_init(void)
     unregister_chrdev:
         unregister_chrdev_region(dev_num, 1);
 
+    free_buffer:
+        kfree(buffer);
+        buffer = NULL;
+
         return ret;
 }
 
@@ -182,6 +203,12 @@ static void ahmet_cleanup(void)
     unregister_chrdev_region(dev_num, 1);
 
     mutex_destroy(&ahmet_mutex);
+
+    if(buffer)
+    {
+        kfree(buffer);
+        buffer = NULL;
+    }
 }
 
 
