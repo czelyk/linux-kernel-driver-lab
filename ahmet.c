@@ -12,7 +12,6 @@
 #define AHMET_IOCTL_MAGIC 'A'
 #define AHMET_CLEAR_BUFFER \
         _IO(AHMET_IOCTL_MAGIC, 1)
-    
 #define AHMET_GET_BUFFER_SIZE \
         _IOR(AHMET_IOCTL_MAGIC, 2, size_t)
 
@@ -24,11 +23,22 @@ static struct device *ahmet_device;
 //static char buffer[BUFFER_SIZE];
 
 
-static char *buffer;
-static size_t buffer_size = 0;
-static size_t buffer_capacity = 0;
+//static char *buffer;
+//static size_t buffer_size = 0;
+//static size_t buffer_capacity = 0;
 
-static struct mutex ahmet_mutex;
+//static struct mutex ahmet_mutex;
+
+struct ahmet_device
+{
+char *buffer;
+size_t buffer_size;
+size_t buffer_capacity;
+
+struct mutex ahmet_mutex;
+};
+
+static struct ahmet_device *ahmet_dev;
 
 static int ahmet_open(struct inode *inode, struct file *file)
 {
@@ -49,21 +59,21 @@ static ssize_t ahmet_read(struct file *file,
 {
 
     size_t bytes_to_read;
-    mutex_lock(&ahmet_mutex);
+    mutex_lock(&ahmet_dev->ahmet_mutex);
 
-    if (*offset >= buffer_size)
+    if (*offset >= ahmet_dev->buffer_size)
     {
-        mutex_unlock(&ahmet_mutex);
+        mutex_unlock(&ahmet_dev->ahmet_mutex);
         return 0;
     }
 
-    bytes_to_read = min(len, buffer_size - *offset);
+    bytes_to_read = min(len, ahmet_dev->buffer_size - *offset);
 
     if (copy_to_user(buf,
-                     buffer + *offset,
+                     ahmet_dev->buffer + *offset,
                      bytes_to_read))
     {
-        mutex_unlock(&ahmet_mutex);
+        mutex_unlock(&ahmet_dev->ahmet_mutex);
         return -EFAULT;
     }
 
@@ -71,7 +81,7 @@ static ssize_t ahmet_read(struct file *file,
 
     pr_info("Device read: %zu bytes\n", bytes_to_read);
 
-    mutex_unlock(&ahmet_mutex);
+    mutex_unlock(&ahmet_dev->ahmet_mutex);
 
     return bytes_to_read;
 }
@@ -82,30 +92,30 @@ static ssize_t ahmet_write(struct file *file,
                            loff_t *offset)
 {
     char *new_buffer;
-    mutex_lock(&ahmet_mutex);
+    mutex_lock(&ahmet_dev->ahmet_mutex);
 
-    if (len > buffer_capacity)
+    if (len > ahmet_dev->buffer_capacity)
         {//len = buffer_capacity;
-        new_buffer = krealloc(buffer, len, GFP_KERNEL);
+        new_buffer = krealloc(ahmet_dev->buffer, len, GFP_KERNEL);
 
         if(!new_buffer)
         {
-            mutex_unlock(&ahmet_mutex);
+            mutex_unlock(&ahmet_dev->ahmet_mutex);
             return -ENOMEM;
         }
-        buffer = new_buffer;
-        buffer_capacity = len;
+        ahmet_dev->buffer = new_buffer;
+        ahmet_dev->buffer_capacity = len;
         }
 
-    if (copy_from_user(buffer, buf, len))
+    if (copy_from_user(ahmet_dev->buffer, buf, len))
     {
-        mutex_unlock(&ahmet_mutex);
+        mutex_unlock(&ahmet_dev->ahmet_mutex);
         return -EFAULT;
     }
 
-    buffer_size = len;
+    ahmet_dev->buffer_size = len;
 
-    mutex_unlock(&ahmet_mutex);
+    mutex_unlock(&ahmet_dev->ahmet_mutex);
 
     pr_info("Device write: %zu bytes\n", len);
 
@@ -117,14 +127,34 @@ static long ahmet_ioctl(struct file *file,
                         unsigned int cmd,
                         unsigned long arg)
 {
+    pr_info("ioctl received cmd=%u\n", cmd);
+    
     switch (cmd)
     {
         case AHMET_CLEAR_BUFFER: 
-            mutex_lock(&ahmet_mutex);
-            memset(buffer, 0, buffer_capacity);
-            buffer_size = 0;
-            mutex_unlock(&ahmet_mutex);
+            mutex_lock(&ahmet_dev->ahmet_mutex);
+            memset(ahmet_dev->buffer, 0, ahmet_dev->buffer_capacity);
+            ahmet_dev->buffer_size = 0;
+            mutex_unlock(&ahmet_dev->ahmet_mutex);
             pr_info("Device buffer cleared\n");
+            return 0;
+
+        case AHMET_GET_BUFFER_SIZE:
+            mutex_lock(&ahmet_dev->ahmet_mutex);
+
+            if (copy_to_user((
+                    void __user *)arg,
+                    &ahmet_dev->buffer_size,
+                    sizeof(size_t)))
+            {
+                mutex_unlock(&ahmet_dev->ahmet_mutex);
+                return  -EFAULT;
+            }
+
+            mutex_unlock(&ahmet_dev->ahmet_mutex);
+
+            pr_info("Returned buffer size\n");
+
             return 0;
         
 
@@ -147,19 +177,37 @@ static int __init ahmet_init(void)
 {
     int ret;
 
-    mutex_init(&ahmet_mutex);
+    ahmet_dev = kzalloc(sizeof(*ahmet_dev), GFP_KERNEL);
 
-    buffer = kmalloc(BUFFER_SIZE, GFP_KERNEL);
-
-    if(!buffer)
+    if(!ahmet_dev)
     {
-        pr_err("Failed to allocate buffer\n");
-        
+        pr_err("Failed to allocate device structure\n");
         return -ENOMEM;
     }
 
-    buffer_capacity = BUFFER_SIZE;
-    memset(buffer, 0, buffer_capacity);
+
+    mutex_init(&ahmet_dev->ahmet_mutex);
+
+    ahmet_dev->buffer = kzalloc(BUFFER_SIZE, GFP_KERNEL);
+
+    //kzalloc alttaki kmalloc yapısının yerine geçiyor. 
+    //normalde eski atıklarla dolu olan bir alan da tanımlanabilir.
+    //ama bu yapı sayesinde alan direkt olarak sıfırlanıyor.
+    
+    //ahmet_dev->buffer = kmalloc(BUFFER_SIZE, GFP_KERNEL);
+    //memset(ahmet_dev->buffer, 0, BUFFER_SIZE);
+
+    if(!ahmet_dev->buffer)
+    {
+        pr_err("Failed to allocate buffer\n");
+        kfree(ahmet_dev);
+        ahmet_dev = NULL;        
+        return -ENOMEM;
+    }
+
+    ahmet_dev->buffer_capacity = BUFFER_SIZE;
+    //ahmet_dev->buffer_size = 0;
+    //memset(ahmet_dev->buffer, 0, ahmet_dev->buffer_capacity);
 
     ret = alloc_chrdev_region(&dev_num, 0, 1, "ahmet");
     if (ret < 0)
@@ -225,8 +273,10 @@ static int __init ahmet_init(void)
         unregister_chrdev_region(dev_num, 1);
 
     free_buffer:
-        kfree(buffer);
-        buffer = NULL;
+        kfree(ahmet_dev->buffer);
+
+        kfree(ahmet_dev);
+        ahmet_dev = NULL;
 
         return ret;
 }
@@ -244,12 +294,16 @@ static void ahmet_cleanup(void)
 
     unregister_chrdev_region(dev_num, 1);
 
-    mutex_destroy(&ahmet_mutex);
 
-    if(buffer)
+    if(ahmet_dev)
     {
-        kfree(buffer);
-        buffer = NULL;
+        mutex_destroy(&ahmet_dev->ahmet_mutex);
+
+        kfree(ahmet_dev->buffer);
+
+        kfree(ahmet_dev);
+
+        ahmet_dev = NULL;
     }
 }
 
