@@ -1,0 +1,1 @@
+sistem çağrıları da yazılacak. 
