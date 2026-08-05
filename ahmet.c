@@ -7,8 +7,13 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include  <linux/ioctl.h>
+#include <linux/wait.h>
+#include <linux/poll.h>
+#include <linux/mm.h>
+#include <linux/vmalloc.h>
 
-#define BUFFER_SIZE 1024
+
+#define BUFFER_SIZE PAGE_SIZE
 #define AHMET_IOCTL_MAGIC 'A'
 #define AHMET_CLEAR_BUFFER \
         _IO(AHMET_IOCTL_MAGIC, 1)
@@ -38,6 +43,10 @@ size_t buffer_size;
 size_t buffer_capacity;
 
 struct mutex ahmet_mutex;
+
+struct fasync_struct *async_queue;
+
+wait_queue_head_t read_queue;
 };
 
 //static struct ahmet_device *ahmet_dev;
@@ -70,6 +79,18 @@ static ssize_t ahmet_read(struct file *file,
                           loff_t *offset)
 {
     struct ahmet_device *dev = file->private_data;
+
+    if((file->f_flags & O_NONBLOCK) &&
+        READ_ONCE(dev->buffer_size) <= *offset)
+    {
+        return -EAGAIN;
+    }
+
+    if (wait_event_interruptible(dev->read_queue,
+                                READ_ONCE(dev->buffer_size) > *offset))
+    {
+        return -ERESTARTSYS;
+    }
 
     size_t bytes_to_read;
     mutex_lock(&dev->ahmet_mutex);
@@ -106,20 +127,14 @@ static ssize_t ahmet_write(struct file *file,
 {
     struct ahmet_device *dev = file->private_data;
 
-    char *new_buffer;
+    //char *new_buffer;
     mutex_lock(&dev->ahmet_mutex);
 
     if (len > dev->buffer_capacity)
-        {//len = buffer_capacity;
-        new_buffer = krealloc(dev->buffer, len, GFP_KERNEL);
-
-        if(!new_buffer)
-        {
+        {        
             mutex_unlock(&dev->ahmet_mutex);
-            return -ENOMEM;
-        }
-        dev->buffer = new_buffer;
-        dev->buffer_capacity = len;
+            
+            return -ENOSPC;
         }
 
     if (copy_from_user(dev->buffer, buf, len))
@@ -132,9 +147,37 @@ static ssize_t ahmet_write(struct file *file,
 
     mutex_unlock(&dev->ahmet_mutex);
 
+    wake_up_interruptible(&dev->read_queue);
+
     pr_info("Device write: %zu bytes\n", len);
 
     return len;
+}
+
+static __poll_t ahmet_poll(struct file *file,
+                            struct poll_table_struct *wait)
+{
+    struct ahmet_device *dev = file->private_data;
+    __poll_t mask = 0;
+
+    poll_wait(file, &dev->read_queue, wait);
+
+    if(READ_ONCE(dev->buffer_size) > file->f_pos)
+    mask |= EPOLLIN | EPOLLRDNORM;
+
+    return mask;
+}
+
+static int ahmet_fasync(int fd,
+                        struct file *file,
+                        int on)
+{
+    struct ahmet_device *dev = file->private_data;
+
+    return fasync_helper(fd,
+                        file,
+                        on,
+                        &dev->async_queue);
 }
 
 
@@ -181,6 +224,29 @@ static long ahmet_ioctl(struct file *file,
 
 }
 
+static int ahmet_mmap(struct file *file,
+                        struct vm_area_struct *vma)
+{
+    struct ahmet_device *dev = file->private_data;
+
+    unsigned long size;
+
+    size = vma->vm_end - vma->vm_start;
+
+    if(size > dev->buffer_capacity)
+        return -EINVAL;
+        
+    if (vma->vm_pgoff != 0)
+        return -EINVAL; 
+
+
+    if (remap_vmalloc_range(vma, dev->buffer, 0))
+        return -EAGAIN;
+
+    return 0;
+}
+
+
 static const struct file_operations fops = {
     .owner = THIS_MODULE,
     .open = ahmet_open,
@@ -188,6 +254,9 @@ static const struct file_operations fops = {
     .read = ahmet_read,
     .write = ahmet_write,
     .unlocked_ioctl = ahmet_ioctl,
+    .poll = ahmet_poll,
+    .mmap = ahmet_mmap,
+    .fasync = ahmet_fasync,
 };
 
 static int __init ahmet_init(void)
@@ -198,9 +267,11 @@ static int __init ahmet_init(void)
     for(i=0;i < DEVICE_COUNT;i++)
     {
         mutex_init(&ahmet_devices[i].ahmet_mutex);
+        
+        init_waitqueue_head(&ahmet_devices[i].read_queue);
 
         ahmet_devices[i].buffer =
-            kzalloc(BUFFER_SIZE, GFP_KERNEL);
+            vmalloc_user(BUFFER_SIZE);
     
         if(!ahmet_devices[i].buffer)
         {
@@ -359,7 +430,7 @@ static int __init ahmet_init(void)
         {
             mutex_destroy(&ahmet_devices[i].ahmet_mutex);
             
-            kfree(ahmet_devices[i].buffer);
+            vfree(ahmet_devices[i].buffer);
             ahmet_devices[i].buffer = NULL;
 
             ahmet_devices[i].buffer_capacity = 0 ;
@@ -407,7 +478,7 @@ static void ahmet_cleanup(void)
     {
         mutex_destroy(&ahmet_devices[i].ahmet_mutex);
 
-        kfree(ahmet_devices[i].buffer);
+        vfree(ahmet_devices[i].buffer);
         ahmet_devices[i].buffer = NULL;
 
         ahmet_devices[i].buffer_capacity = 0;
