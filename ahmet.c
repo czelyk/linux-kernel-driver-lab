@@ -69,6 +69,11 @@ static int ahmet_open(struct inode *inode, struct file *file)
 
 static int ahmet_release(struct inode *inode, struct file *file)
 {
+    struct ahmet_device *dev = file->private_data;
+    fasync_helper(-1,
+              file,
+              0,
+              &dev->async_queue);
     pr_info("Device closed\n");
     return 0;
 }
@@ -251,6 +256,49 @@ static int ahmet_mmap(struct file *file,
     return 0;
 }
 
+static loff_t ahmet_llseek(struct file *file,
+                            loff_t offset,
+                            int whence)
+{
+    struct ahmet_device *dev = file->private_data;
+    loff_t new_position;
+
+    if (whence == SEEK_SET)
+        new_position = offset;
+    
+    else if (whence == SEEK_CUR)
+        new_position = file->f_pos + offset;
+    
+    
+    else if (whence == SEEK_END)
+    {
+    mutex_lock(&dev->ahmet_mutex);
+
+    new_position = dev->buffer_size + offset;
+
+    mutex_unlock(&dev->ahmet_mutex);
+    }
+    
+    else
+        return -EINVAL;
+
+    if (new_position<0)
+        return -EINVAL;
+
+    mutex_lock(&dev->ahmet_mutex);
+
+    if(new_position > dev->buffer_size)
+    {
+        mutex_unlock(&dev->ahmet_mutex);
+        return -EINVAL;
+    }
+
+    file->f_pos = new_position;
+    mutex_unlock(&dev->ahmet_mutex);
+
+    return new_position;
+}
+
 
 static const struct file_operations fops = {
     .owner = THIS_MODULE,
@@ -262,6 +310,7 @@ static const struct file_operations fops = {
     .poll = ahmet_poll,
     .mmap = ahmet_mmap,
     .fasync = ahmet_fasync,
+    .llseek = ahmet_llseek,
 };
 
 static int __init ahmet_init(void)
