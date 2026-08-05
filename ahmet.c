@@ -42,6 +42,7 @@ static struct ahmet_device *ahmet_dev;
 
 static int ahmet_open(struct inode *inode, struct file *file)
 {
+    file->private_data = ahmet_dev;
     pr_info("Device opened\n");
     return 0;
 }
@@ -57,23 +58,24 @@ static ssize_t ahmet_read(struct file *file,
                           size_t len,
                           loff_t *offset)
 {
+    struct ahmet_device *dev = file->private_data;
 
     size_t bytes_to_read;
-    mutex_lock(&ahmet_dev->ahmet_mutex);
+    mutex_lock(&dev->ahmet_mutex);
 
-    if (*offset >= ahmet_dev->buffer_size)
+    if (*offset >= dev->buffer_size)
     {
-        mutex_unlock(&ahmet_dev->ahmet_mutex);
+        mutex_unlock(&dev->ahmet_mutex);
         return 0;
     }
 
-    bytes_to_read = min(len, ahmet_dev->buffer_size - *offset);
+    bytes_to_read = min(len, dev->buffer_size - *offset);
 
     if (copy_to_user(buf,
-                     ahmet_dev->buffer + *offset,
+                     dev->buffer + *offset,
                      bytes_to_read))
     {
-        mutex_unlock(&ahmet_dev->ahmet_mutex);
+        mutex_unlock(&dev->ahmet_mutex);
         return -EFAULT;
     }
 
@@ -81,7 +83,7 @@ static ssize_t ahmet_read(struct file *file,
 
     pr_info("Device read: %zu bytes\n", bytes_to_read);
 
-    mutex_unlock(&ahmet_dev->ahmet_mutex);
+    mutex_unlock(&dev->ahmet_mutex);
 
     return bytes_to_read;
 }
@@ -91,31 +93,33 @@ static ssize_t ahmet_write(struct file *file,
                            size_t len,
                            loff_t *offset)
 {
-    char *new_buffer;
-    mutex_lock(&ahmet_dev->ahmet_mutex);
+    struct ahmet_device *dev = file->private_data;
 
-    if (len > ahmet_dev->buffer_capacity)
+    char *new_buffer;
+    mutex_lock(&dev->ahmet_mutex);
+
+    if (len > dev->buffer_capacity)
         {//len = buffer_capacity;
-        new_buffer = krealloc(ahmet_dev->buffer, len, GFP_KERNEL);
+        new_buffer = krealloc(dev->buffer, len, GFP_KERNEL);
 
         if(!new_buffer)
         {
-            mutex_unlock(&ahmet_dev->ahmet_mutex);
+            mutex_unlock(&dev->ahmet_mutex);
             return -ENOMEM;
         }
-        ahmet_dev->buffer = new_buffer;
-        ahmet_dev->buffer_capacity = len;
+        dev->buffer = new_buffer;
+        dev->buffer_capacity = len;
         }
 
-    if (copy_from_user(ahmet_dev->buffer, buf, len))
+    if (copy_from_user(dev->buffer, buf, len))
     {
-        mutex_unlock(&ahmet_dev->ahmet_mutex);
+        mutex_unlock(&dev->ahmet_mutex);
         return -EFAULT;
     }
 
-    ahmet_dev->buffer_size = len;
+    dev->buffer_size = len;
 
-    mutex_unlock(&ahmet_dev->ahmet_mutex);
+    mutex_unlock(&dev->ahmet_mutex);
 
     pr_info("Device write: %zu bytes\n", len);
 
@@ -127,31 +131,33 @@ static long ahmet_ioctl(struct file *file,
                         unsigned int cmd,
                         unsigned long arg)
 {
+    struct ahmet_device *dev = file->private_data;
+
     pr_info("ioctl received cmd=%u\n", cmd);
     
     switch (cmd)
     {
         case AHMET_CLEAR_BUFFER: 
-            mutex_lock(&ahmet_dev->ahmet_mutex);
-            memset(ahmet_dev->buffer, 0, ahmet_dev->buffer_capacity);
-            ahmet_dev->buffer_size = 0;
-            mutex_unlock(&ahmet_dev->ahmet_mutex);
+            mutex_lock(&dev->ahmet_mutex);
+            memset(dev->buffer, 0, dev->buffer_capacity);
+            dev->buffer_size = 0;
+            mutex_unlock(&dev->ahmet_mutex);
             pr_info("Device buffer cleared\n");
             return 0;
 
         case AHMET_GET_BUFFER_SIZE:
-            mutex_lock(&ahmet_dev->ahmet_mutex);
+            mutex_lock(&dev->ahmet_mutex);
 
             if (copy_to_user((
                     void __user *)arg,
-                    &ahmet_dev->buffer_size,
+                    &dev->buffer_size,
                     sizeof(size_t)))
             {
-                mutex_unlock(&ahmet_dev->ahmet_mutex);
+                mutex_unlock(&dev->ahmet_mutex);
                 return  -EFAULT;
             }
 
-            mutex_unlock(&ahmet_dev->ahmet_mutex);
+            mutex_unlock(&dev->ahmet_mutex);
 
             pr_info("Returned buffer size\n");
 
