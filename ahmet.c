@@ -149,6 +149,11 @@ static ssize_t ahmet_write(struct file *file,
 
     wake_up_interruptible(&dev->read_queue);
 
+    if (dev->async_queue)
+        kill_fasync(&dev->async_queue,
+                    SIGIO,
+                    POLL_IN);
+
     pr_info("Device write: %zu bytes\n", len);
 
     return len;
