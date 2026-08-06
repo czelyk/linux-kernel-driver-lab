@@ -65,6 +65,7 @@ struct mutex ahmet_mutex;
 struct fasync_struct *async_queue;
 
 wait_queue_head_t read_queue;
+wait_queue_head_t write_queue;
 };
 
 //static struct ahmet_device *ahmet_dev;
@@ -103,47 +104,41 @@ static ssize_t ahmet_read(struct file *file,
                           char __user *buf,
                           size_t len,
                           loff_t *offset)
-{
+{   
+    (void) offset;
+
     struct ahmet_device *dev = file->private_data;
 
+    unsigned int copied = 0;
+    int ret;
+
     if((file->f_flags & O_NONBLOCK) &&
-        READ_ONCE(dev->buffer_size) <= *offset)
+        kfifo_is_empty(&dev->fifo))
     {
         return -EAGAIN;
     }
 
     if (wait_event_interruptible(dev->read_queue,
-                                READ_ONCE(dev->buffer_size) > *offset))
+                                !kfifo_is_empty(&dev->fifo)))
     {
         return -ERESTARTSYS;
     }
 
-    size_t bytes_to_read;
     mutex_lock(&dev->ahmet_mutex);
 
-    if (*offset >= dev->buffer_size)
-    {
-        mutex_unlock(&dev->ahmet_mutex);
-        return 0;
-    }
-
-    bytes_to_read = min(len, dev->buffer_size - *offset);
-
-    if (copy_to_user(buf,
-                     dev->buffer + *offset,
-                     bytes_to_read))
-    {
-        mutex_unlock(&dev->ahmet_mutex);
-        return -EFAULT;
-    }
-
-    *offset += bytes_to_read;
-
-    pr_info("Device read: %zu bytes\n", bytes_to_read);
+    ret = kfifo_to_user(&dev->fifo,
+                        buf,
+                        len,
+                        &copied);
 
     mutex_unlock(&dev->ahmet_mutex);
 
-    return bytes_to_read;
+    if(ret)
+        return ret;
+
+    pr_info("FIPO read: %u bytes\n", copied);
+
+    return copied;
 }
 
 static ssize_t ahmet_write(struct file *file,
@@ -151,40 +146,31 @@ static ssize_t ahmet_write(struct file *file,
                            size_t len,
                            loff_t *offset)
 {
+    (void) offset;
+
     struct ahmet_device *dev = file->private_data;
 
+    unsigned int copied = 0;
+    int ret;
     //char *new_buffer;
     mutex_lock(&dev->ahmet_mutex);
 
-    if (*offset < 0 ||
-            len > dev->buffer_capacity - *offset)     
-        {
-
-            mutex_unlock(&dev->ahmet_mutex);
-            
-            return -ENOSPC;
-        }
-
-    if (copy_from_user(dev->buffer +  *offset, buf, len))
+    if (len> kfifo_avail(&dev->fifo))
     {
         mutex_unlock(&dev->ahmet_mutex);
-        return -EFAULT;
+        return -ENOSPC;
     }
 
-    *offset += len;
-
-    if(*offset > dev->buffer_size)
-    {
-        dev->buffer_size = *offset;
-    }
-
+    ret = kfifo_from_user(&dev->fifo,
+                            buf,
+                            len,
+                            &copied);
+                            
 
     mutex_unlock(&dev->ahmet_mutex);
 
-    if (file->f_flags & O_APPEND)
-    {
-        *offset = dev->buffer_size;
-    }
+    if(ret)
+        return ret;
 
     wake_up_interruptible(&dev->read_queue);
 
@@ -193,9 +179,9 @@ static ssize_t ahmet_write(struct file *file,
                     SIGIO,
                     POLL_IN);
 
-    pr_info("Device write: %zu bytes\n", len);
+    pr_info("Device write: %u bytes\n", copied);
 
-    return len;
+    return copied;
 }
 
 static __poll_t ahmet_poll(struct file *file,
@@ -205,9 +191,16 @@ static __poll_t ahmet_poll(struct file *file,
     __poll_t mask = 0;
 
     poll_wait(file, &dev->read_queue, wait);
+    poll_wait(file, &dev->write_queue, wait);
 
-    if(READ_ONCE(dev->buffer_size) > file->f_pos)
+    if(!kfifo_is_empty(&dev->fifo))
     mask |= EPOLLIN | EPOLLRDNORM;
+
+
+    if(!kfifo_is_full(&dev->fifo))
+    {
+        mask |= EPOLLOUT | EPOLLWRNORM;
+    }
 
     return mask;
 }
@@ -428,6 +421,7 @@ static int __init ahmet_init(void)
         mutex_init(&ahmet_devices[i].ahmet_mutex);
         
         init_waitqueue_head(&ahmet_devices[i].read_queue);
+        init_waitqueue_head(&ahmet_devices[i].write_queue);
 
         ahmet_devices[i].buffer =
             vmalloc_user(BUFFER_SIZE);
@@ -441,6 +435,19 @@ static int __init ahmet_init(void)
 
         ahmet_devices[i].buffer_capacity = BUFFER_SIZE;
         ahmet_devices[i].buffer_size = 0;
+
+        ret = kfifo_alloc(&ahmet_devices[i].fifo,
+                            BUFFER_SIZE,
+                            GFP_KERNEL);
+
+        if(ret)
+        {
+            pr_err("Failed to allocate FIFO for device %d\n", i);
+
+            mutex_destroy(&ahmet_devices[i].ahmet_mutex);
+
+            goto free_device_buffers;
+        }
     }
 
     //ahmet_dev = kzalloc(sizeof(*ahmet_dev), GFP_KERNEL);
@@ -589,6 +596,8 @@ static int __init ahmet_init(void)
         {
             mutex_destroy(&ahmet_devices[i].ahmet_mutex);
             
+            kfifo_free(&ahmet_devices[i].fifo);
+            
             vfree(ahmet_devices[i].buffer);
             ahmet_devices[i].buffer = NULL;
 
@@ -637,6 +646,7 @@ static void ahmet_cleanup(void)
     {
         mutex_destroy(&ahmet_devices[i].ahmet_mutex);
 
+        kfifo_free(&ahmet_devices[i].fifo);
         vfree(ahmet_devices[i].buffer);
         ahmet_devices[i].buffer = NULL;
 
