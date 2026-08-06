@@ -1,0 +1,21 @@
+make -C /lib/modules/7.0.0-28-generic/build M=/home/ahmet/tasks/task1 modules
+make[1]: Entering directory '/usr/src/linux-headers-7.0.0-28-generic'
+make[2]: Entering directory '/home/ahmet/tasks/task1'
+warning: the compiler differs from the one used to build the kernel
+  The kernel was built by: x86_64-linux-gnu-gcc-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+  You are using:           gcc-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+warning: pahole version differs from the one used to build the kernel
+  The kernel was built with: 125
+  You are using:             0
+  CC [M]  ahmet_fifo.o
+ahmet_fifo.c:371:15: error: ‘no_llseek’ undeclared here (not in a function); did you mean ‘noop_llseek’?
+  371 |     .llseek = no_llseek,
+      |               ^~~~~~~~~
+      |               noop_llseek
+make[4]: *** [/usr/src/linux-headers-7.0.0-28-generic/scripts/Makefile.build:289: ahmet_fifo.o] Error 1
+make[3]: *** [/usr/src/linux-headers-7.0.0-28-generic/Makefile:2115: .] Error 2
+make[2]: *** [/usr/src/linux-headers-7.0.0-28-generic/Makefile:248: __sub-make] Error 2
+make[2]: Leaving directory '/home/ahmet/tasks/task1'
+make[1]: *** [Makefile:248: __sub-make] Error 2
+make[1]: Leaving directory '/usr/src/linux-headers-7.0.0-28-generic'
+make: *** [Makefile:7: all] Error 2

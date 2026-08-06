@@ -6,54 +6,65 @@
 
 int main(void)
 {
-int fd;
-int ret;
-struct pollfd pfd;
-char buffer[128];
+    int fd;
+    int ret;
+    char buffer[128];
+    ssize_t bytes_read;
+    struct pollfd pfd;
 
-fd= open("/dev/ahmet0", O_RDONLY);
+    fd = open("/dev/ahmet0", O_RDONLY);
 
-if (fd<0)
-{
-perror("open");
-return 1;
-}
+    if (fd < 0)
+    {
+        perror("open");
+        return 1;
+    }
 
-printf("Device opened\n");
+    pfd.fd = fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
 
-pfd.fd = fd;
-pfd.events = POLLIN;
-pfd.revents = 0;
+    printf("FIFO verisi bekleniyor...\n");
+    fflush(stdout);
 
-printf("Waiting.. \n");
+    ret = poll(&pfd, 1, -1);
 
-ret = poll(&pfd, 1, -1);
+    if (ret < 0)
+    {
+        perror("poll");
+        close(fd);
+        return 1;
+    }
 
-if (ret < 0)
-{
-perror("poll");
-return 1;
-}
+    if (pfd.revents & POLLIN)
+    {
+        bytes_read = read(fd,
+                          buffer,
+                          sizeof(buffer) - 1);
 
+        if (bytes_read < 0)
+        {
+            perror("read");
+            close(fd);
+            return 1;
+        }
 
-if (pfd.revents & POLLIN)
-{
-ssize_t bytes_read;
+        buffer[bytes_read] = '\0';
 
-bytes_read = read(fd, buffer, sizeof(buffer) -1);
+        printf("FIFO'dan okunan: %s\n", buffer);
+    }
 
-if(bytes_read < 0)
-{
-perror("read");
-close(fd);
-return 1;
-}
+    if (pfd.revents & POLLERR)
+    {
+        printf("Cihaz hata bildirdi\n");
+    }
 
-buffer[bytes_read] = '\0';
+    if (pfd.revents & POLLHUP)
+    {
+        printf("Cihaz bağlantısı kapandı\n");
+    }
 
-printf("Data received %s\n", buffer);
-}
+    close(fd);
 
-close(fd);
-return 0;
+    return 0;
 }
