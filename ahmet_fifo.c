@@ -11,7 +11,7 @@
 #include <linux/poll.h>
 #include <linux/mm.h>
 #include <linux/vmalloc.h>
-
+#include <linux/kfifo.h>
 
 #define BUFFER_SIZE PAGE_SIZE
 
@@ -53,6 +53,7 @@ static struct device *ahmet_device[DEVICE_COUNT];
 struct ahmet_device
 {
 struct cdev cdev;
+struct kfifo fifo;
 int device_id;
 
 char *buffer;
