@@ -11,6 +11,8 @@
 #include <linux/poll.h>
 #include <linux/mm.h>
 #include <linux/vmalloc.h>
+#include <linux/timer.h>
+#include <linux/jiffies.h>
 
 
 #define BUFFER_SIZE PAGE_SIZE
@@ -63,12 +65,47 @@ struct mutex ahmet_mutex;
 
 struct fasync_struct *async_queue;
 
+struct timer_list timer;
+
 wait_queue_head_t read_queue;
 };
 
 //static struct ahmet_device *ahmet_dev;
 
 static struct ahmet_device ahmet_devices[DEVICE_COUNT];
+
+static void ahmet_timer_callback(struct timer_list *timer)
+{
+    struct ahmet_device *dev;
+    const char *message = "Timer Event\n";
+    size_t len = strlen(message);
+    dev = from_timer(dev, timer, timer);
+
+    mutex_lock(&dev->ahmet_mutex);
+
+    if(len <= dev->ahmet_mutex)
+    {
+        memcpy(dev->buffer,
+                message,
+                len);
+
+        dev->buffer_size = len;
+    }
+
+    mutex_unlock(&dev->ahmet_mutex);
+
+    wake_up_interruptible(&dev->ahmet_mutex);
+
+    if(dev->async_queue)
+    {
+        kill_fasync(&dev->async_queue,
+                    SIGIO,
+                    POLL_IN);
+    }
+    
+    mod_timer(&dev->timer,
+                jiffies + msecs_to_jiffies(1000));
+}
 
 static int ahmet_open(struct inode *inode, struct file *file)
 {
@@ -428,6 +465,10 @@ static int __init ahmet_init(void)
         
         init_waitqueue_head(&ahmet_devices[i].read_queue);
 
+        timer_setup(&ahmet_devices[i].timer,
+                    ahmet_timer_callback,
+                    0);
+
         ahmet_devices[i].buffer =
             vmalloc_user(BUFFER_SIZE);
     
@@ -586,6 +627,8 @@ static int __init ahmet_init(void)
     free_device_buffers:
         while(--i >= 0)
         {
+            del_timer_sync(&ahmet_devices[i].timer);
+
             mutex_destroy(&ahmet_devices[i].ahmet_mutex);
             
             vfree(ahmet_devices[i].buffer);
@@ -634,6 +677,8 @@ static void ahmet_cleanup(void)
 
     for(i=0; i< DEVICE_COUNT;i++)
     {
+        del_timer_sync(&ahmet_devices[i].timer);
+
         mutex_destroy(&ahmet_devices[i].ahmet_mutex);
 
         vfree(ahmet_devices[i].buffer);
