@@ -5,6 +5,7 @@
 #include <linux/uaccess.h>
 #include <linux/device.h>
 #include <linux/mutex.h>
+#include <linux/spinlock.h>
 #include <linux/slab.h>
 #include  <linux/ioctl.h>
 #include <linux/wait.h>
@@ -67,6 +68,7 @@ struct ahmet_device
     unsigned long produced_events;
     unsigned long read_events;
     unsigned long dropped_events;
+    unsigned long timer_callbacks;
 
     struct fasync_struct *async_queue;
 
@@ -125,6 +127,12 @@ static void ahmet_timer_callback(struct timer_list *timer)
                        struct ahmet_device,
                        timer);
 
+    spin_lock(&dev->stats_lock);
+
+    dev->timer_callbacks++;
+
+    spin_unlock(&dev->stats_lock);
+    
     schedule_work(&dev->timer_work);
 
     mod_timer(&dev->timer,
@@ -136,6 +144,11 @@ static int ahmet_thread_function(void *data)
     struct ahmet_device *dev = data;
     static const char message[] = "Thread Event\n";
     const unsigned int message_len = sizeof(message) - 1;
+
+    unsigned long produced;
+    unsigned long read_count;
+    unsigned long dropped;
+    unsigned long timer_count;
 
     pr_info("Kthread started for device %d\n",
             dev->device_id);
@@ -181,6 +194,12 @@ static int ahmet_thread_function(void *data)
 
         if (inserted == message_len)
         {
+            spin_lock_bh(&dev->stats_lock);
+
+            dev->produced_events++;
+
+            spin_unlock_bh(&dev->stats_lock);
+
             wake_up_interruptible(&dev->read_queue);
 
             if (dev->async_queue)
@@ -196,11 +215,33 @@ static int ahmet_thread_function(void *data)
         }
         else
         {
+            spin_lock_bh(&dev->stats_lock);
+
+            dev->dropped_events++;
+
+            spin_unlock_bh(&dev->stats_lock);
+
             pr_info("Device %d FIFO full, thread event dropped\n",
                     dev->device_id);
         }
     }
 
+    spin_lock_bh(&dev->stats_lock);
+
+    produced = dev->produced_events;
+    read_count = dev->read_events;
+    dropped = dev->dropped_events;
+    timer_count = dev->timer_callbacks;
+
+    spin_unlock_bh(&dev->stats_lock);
+
+    pr_info("Device %d stats: produced=%lu read=%lu dropped=%lu timer=%lu\n",
+        dev->device_id,
+        produced,
+        read_count,
+        dropped,
+        timer_count);
+    
     pr_info("Kthread stopping for device %d\n",
             dev->device_id);
 
@@ -275,6 +316,15 @@ static ssize_t ahmet_read(struct file *file,
     
     if(ret)
         return ret;
+
+    if (copied > 0)
+    {
+        spin_lock_bh(&dev->stats_lock);
+
+        dev->read_events++;
+
+        spin_unlock_bh(&dev->stats_lock);
+    }
 
     wake_up_interruptible(&dev->write_queue);
 
@@ -519,6 +569,14 @@ static int __init ahmet_init(void)
     {
         ahmet_devices[i].device_id = i;
         mutex_init(&ahmet_devices[i].ahmet_mutex);
+
+        spin_lock_init(&ahmet_devices[i].stats_lock);
+
+        ahmet_devices[i].produced_events = 0;
+        ahmet_devices[i].read_events = 0;
+        ahmet_devices[i].dropped_events = 0;
+
+        ahmet_devices[i].timer_callbacks = 0;
         
         init_waitqueue_head(&ahmet_devices[i].read_queue);
         init_waitqueue_head(&ahmet_devices[i].write_queue);
@@ -568,6 +626,10 @@ static int __init ahmet_init(void)
 
             goto free_device_buffers;
         }
+
+        mod_timer(&ahmet_devices[i].timer,
+          jiffies + msecs_to_jiffies(1000));
+
     }
 
     ret = alloc_chrdev_region(&dev_num, 0, DEVICE_COUNT, "ahmet");
