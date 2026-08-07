@@ -13,7 +13,7 @@
 #include <linux/vmalloc.h>
 #include <linux/timer.h>
 #include <linux/jiffies.h>
-
+#include <linux/workqueue.h>
 
 #define BUFFER_SIZE PAGE_SIZE
 
@@ -66,6 +66,7 @@ struct mutex ahmet_mutex;
 struct fasync_struct *async_queue;
 
 struct timer_list timer;
+struct work_struct timer_work;
 
 wait_queue_head_t read_queue;
 };
@@ -74,27 +75,30 @@ wait_queue_head_t read_queue;
 
 static struct ahmet_device ahmet_devices[DEVICE_COUNT];
 
-static void ahmet_timer_callback(struct timer_list *timer)
+static void ahmet_timer_work(struct work_struct *work)
 {
-    struct ahmet_device *dev;
-    const char *message = "Timer Event\n";
-    size_t len = strlen(message);
-    dev = from_timer(dev, timer, timer);
+    struct  ahmet_device *dev;
+    static const char message[] = "Timer Event\n";
+    size_t message_len = sizeof(message) -1;
+
+    dev = container_of(work,
+                        struct ahmet_device,
+                        timer_work);
 
     mutex_lock(&dev->ahmet_mutex);
 
-    if(len <= dev->ahmet_mutex)
+    if(message_len <= dev->buffer_capacity)
     {
         memcpy(dev->buffer,
                 message,
-                len);
+                message_len);
 
-        dev->buffer_size = len;
+        dev->buffer_size =message_len;
     }
 
     mutex_unlock(&dev->ahmet_mutex);
 
-    wake_up_interruptible(&dev->ahmet_mutex);
+    wake_up_interruptible(&dev->read_queue);
 
     if(dev->async_queue)
     {
@@ -103,8 +107,31 @@ static void ahmet_timer_callback(struct timer_list *timer)
                     POLL_IN);
     }
     
+}
+
+static void ahmet_timer_callback(struct timer_list *timer)
+{
+    struct ahmet_device *dev;
+
+    dev = container_of(timer,
+                        struct ahmet_device, timer);
+
+
+    schedule_work(&dev->timer_work);
+
     mod_timer(&dev->timer,
                 jiffies + msecs_to_jiffies(1000));
+
+    //atomic_set(&dev->timer_event, 1);
+
+    //wake_up_interruptible(&dev->read_queue);
+
+    //if(dev->async_queue)
+    //{
+    //    kill_fasync(&dev->async_queue,
+    //                SIGIO,
+    //                POLL_IN);
+    //}
 }
 
 static int ahmet_open(struct inode *inode, struct file *file)
@@ -142,6 +169,8 @@ static ssize_t ahmet_read(struct file *file,
 {
     struct ahmet_device *dev = file->private_data;
 
+    size_t bytes_to_read;
+
     if((file->f_flags & O_NONBLOCK) &&
         READ_ONCE(dev->buffer_size) <= *offset)
     {
@@ -154,7 +183,6 @@ static ssize_t ahmet_read(struct file *file,
         return -ERESTARTSYS;
     }
 
-    size_t bytes_to_read;
     mutex_lock(&dev->ahmet_mutex);
 
     if (*offset >= dev->buffer_size)
@@ -243,7 +271,9 @@ static __poll_t ahmet_poll(struct file *file,
     poll_wait(file, &dev->read_queue, wait);
 
     if(READ_ONCE(dev->buffer_size) > file->f_pos)
-    mask |= EPOLLIN | EPOLLRDNORM;
+    {
+        mask |= EPOLLIN | EPOLLRDNORM;
+    }
 
     return mask;
 }
@@ -465,6 +495,9 @@ static int __init ahmet_init(void)
         
         init_waitqueue_head(&ahmet_devices[i].read_queue);
 
+        INIT_WORK(&ahmet_devices[i].timer_work,
+                ahmet_timer_work);
+
         timer_setup(&ahmet_devices[i].timer,
                     ahmet_timer_callback,
                     0);
@@ -481,6 +514,9 @@ static int __init ahmet_init(void)
 
         ahmet_devices[i].buffer_capacity = BUFFER_SIZE;
         ahmet_devices[i].buffer_size = 0;
+
+        mod_timer(&ahmet_devices[i].timer,
+                    jiffies + msecs_to_jiffies(1000));
     }
 
     //ahmet_dev = kzalloc(sizeof(*ahmet_dev), GFP_KERNEL);
@@ -627,7 +663,9 @@ static int __init ahmet_init(void)
     free_device_buffers:
         while(--i >= 0)
         {
-            del_timer_sync(&ahmet_devices[i].timer);
+            timer_shutdown_sync(&ahmet_devices[i].timer);
+
+            cancel_work_sync(&ahmet_devices[i].timer_work);
 
             mutex_destroy(&ahmet_devices[i].ahmet_mutex);
             
@@ -677,7 +715,9 @@ static void ahmet_cleanup(void)
 
     for(i=0; i< DEVICE_COUNT;i++)
     {
-        del_timer_sync(&ahmet_devices[i].timer);
+        timer_shutdown_sync(&ahmet_devices[i].timer);
+
+        cancel_work_sync(&ahmet_devices[i].timer_work);
 
         mutex_destroy(&ahmet_devices[i].ahmet_mutex);
 

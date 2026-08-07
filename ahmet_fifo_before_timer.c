@@ -12,9 +12,6 @@
 #include <linux/mm.h>
 #include <linux/vmalloc.h>
 #include <linux/kfifo.h>
-#include <linux/timer.h>
-#include <linux/jiffies.h>
-#include <linux/workqueue.h>
 
 #define BUFFER_SIZE PAGE_SIZE
 
@@ -65,63 +62,11 @@ struct fasync_struct *async_queue;
 
 wait_queue_head_t read_queue;
 wait_queue_head_t write_queue;
-
-struct timer_list timer;
-struct work_struct timer_work;
 };
 
 //static struct ahmet_device *ahmet_dev;
 
 static struct ahmet_device ahmet_devices[DEVICE_COUNT];
-
-static void ahmet_timer_work(struct work_struct *work)
-{
-    struct ahmet_device *dev;
-    static const char message[] = "Timer Event\n";
-    unsigned int inserted;
-
-    dev = container_of(work,
-                       struct ahmet_device,
-                       timer_work);
-
-    mutex_lock(&dev->ahmet_mutex);
-
-    inserted = kfifo_in(&dev->fifo,
-                        message,
-                        sizeof(message) - 1);
-
-    mutex_unlock(&dev->ahmet_mutex);
-
-    if (inserted > 0)
-    {
-        wake_up_interruptible(&dev->read_queue);
-
-        if (dev->async_queue)
-        {
-            kill_fasync(&dev->async_queue,
-                        SIGIO,
-                        POLL_IN);
-        }
-
-        pr_info("Timer worker inserted %u bytes into device %d FIFO\n",
-                inserted,
-                dev->device_id);
-    }
-}
-
-static void ahmet_timer_callback(struct timer_list *timer)
-{
-    struct ahmet_device *dev;
-
-    dev = container_of(timer,
-                       struct ahmet_device,
-                       timer);
-
-    schedule_work(&dev->timer_work);
-
-    mod_timer(&dev->timer,
-              jiffies + msecs_to_jiffies(1000));
-}
 
 static int ahmet_open(struct inode *inode, struct file *file)
 {
@@ -135,7 +80,6 @@ static int ahmet_open(struct inode *inode, struct file *file)
 
     pr_info("Device opened\n");
     return 0;
-
 }
 
 static int ahmet_release(struct inode *inode, struct file *file)
@@ -438,13 +382,6 @@ static int __init ahmet_init(void)
         init_waitqueue_head(&ahmet_devices[i].read_queue);
         init_waitqueue_head(&ahmet_devices[i].write_queue);
 
-        INIT_WORK(&ahmet_devices[i].timer_work,
-          ahmet_timer_work);
-
-        timer_setup(&ahmet_devices[i].timer,
-            ahmet_timer_callback,
-            0);
-
         ret = kfifo_alloc(&ahmet_devices[i].fifo,
                             BUFFER_SIZE,
                             GFP_KERNEL);
@@ -457,9 +394,6 @@ static int __init ahmet_init(void)
 
             goto free_device_buffers;
         }
-
-        mod_timer(&ahmet_devices[i].timer,
-          jiffies + msecs_to_jiffies(1000));
     }
 
     ret = alloc_chrdev_region(&dev_num, 0, DEVICE_COUNT, "ahmet");
@@ -494,7 +428,7 @@ static int __init ahmet_init(void)
         }
     }
 
-    ahmet_class = class_create("ahmet_fifo_class");
+    ahmet_class = class_create("ahmet_class");
     if (IS_ERR(ahmet_class))
     {
         ret = PTR_ERR(ahmet_class);
@@ -513,7 +447,7 @@ static int __init ahmet_init(void)
         NULL,
         current_dev_num,
         NULL,
-        "ahmet_fifo%d",
+        "ahmet%d",
         i
         );
 
@@ -559,10 +493,6 @@ static int __init ahmet_init(void)
     free_device_buffers:
         while(--i >= 0)
         {
-            timer_shutdown_sync(&ahmet_devices[i].timer);
-
-            cancel_work_sync(&ahmet_devices[i].timer_work);
-
             mutex_destroy(&ahmet_devices[i].ahmet_mutex);
             
             kfifo_free(&ahmet_devices[i].fifo);
@@ -576,15 +506,15 @@ static void ahmet_cleanup(void)
     int i;
 
 
-    for (i = 0; i < DEVICE_COUNT; i++)
+    for(i = 0; i < DEVICE_COUNT; i++)
     {
-        timer_shutdown_sync(&ahmet_devices[i].timer);
+        dev_t current_dev_num;
 
-        cancel_work_sync(&ahmet_devices[i].timer_work);
+        current_dev_num = MKDEV(MAJOR(dev_num),
+                                MINOR(dev_num) + i);
 
-        mutex_destroy(&ahmet_devices[i].ahmet_mutex);
-
-        kfifo_free(&ahmet_devices[i].fifo);
+        device_destroy(ahmet_class, current_dev_num);
+        ahmet_device[i] = NULL;
     }
 
 

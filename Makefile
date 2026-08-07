@@ -1,4 +1,4 @@
-obj-m += ahmet.o
+obj-m += ahmet_fifo.o
 
 KDIR := /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
