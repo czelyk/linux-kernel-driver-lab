@@ -15,6 +15,8 @@
 #include <linux/timer.h>
 #include <linux/jiffies.h>
 #include <linux/workqueue.h>
+#include <linux/kthread.h>
+#include <linux/delay.h>
 
 #define BUFFER_SIZE PAGE_SIZE
 
@@ -55,19 +57,25 @@ static struct device *ahmet_device[DEVICE_COUNT];
 
 struct ahmet_device
 {
-struct cdev cdev;
-struct kfifo fifo;
-int device_id;
+    struct cdev cdev;
+    struct kfifo fifo;
+    int device_id;
 
-struct mutex ahmet_mutex;
+    struct mutex ahmet_mutex;
 
-struct fasync_struct *async_queue;
+    spinlock_t stats_lock;
+    unsigned long produced_events;
+    unsigned long read_events;
+    unsigned long dropped_events;
 
-wait_queue_head_t read_queue;
-wait_queue_head_t write_queue;
+    struct fasync_struct *async_queue;
 
-struct timer_list timer;
-struct work_struct timer_work;
+    wait_queue_head_t read_queue;
+    wait_queue_head_t write_queue;
+
+    struct timer_list timer;
+    struct work_struct timer_work;
+    struct task_struct *thread;
 };
 
 //static struct ahmet_device *ahmet_dev;
@@ -122,6 +130,83 @@ static void ahmet_timer_callback(struct timer_list *timer)
     mod_timer(&dev->timer,
               jiffies + msecs_to_jiffies(1000));
 }
+
+static int ahmet_thread_function(void *data)
+{
+    struct ahmet_device *dev = data;
+    static const char message[] = "Thread Event\n";
+    const unsigned int message_len = sizeof(message) - 1;
+
+    pr_info("Kthread started for device %d\n",
+            dev->device_id);
+
+    while (!kthread_should_stop())
+    {
+        unsigned int inserted = 0;
+
+        /*
+         * Thread yaklaşık bir saniye uyur.
+         * kthread_stop() gelirse uyku erken kesilebilir.
+         */
+        if (msleep_interruptible(1000) &&
+            kthread_should_stop())
+        {
+            break;
+        }
+
+        /*
+         * Uyku normal bitse bile bu arada durma isteği
+         * gelmiş olabilir. FIFO'ya son bir veri yazmamak
+         * için tekrar kontrol ediyoruz.
+         */
+        if (kthread_should_stop())
+        {
+            break;
+        }
+
+        mutex_lock(&dev->ahmet_mutex);
+
+        /*
+         * Mesajın tamamı için yer varsa ekliyoruz.
+         * Böylece FIFO'ya yarım "Thread Event" girmez.
+         */
+        if (kfifo_avail(&dev->fifo) >= message_len)
+        {
+            inserted = kfifo_in(&dev->fifo,
+                                message,
+                                message_len);
+        }
+
+        mutex_unlock(&dev->ahmet_mutex);
+
+        if (inserted == message_len)
+        {
+            wake_up_interruptible(&dev->read_queue);
+
+            if (dev->async_queue)
+            {
+                kill_fasync(&dev->async_queue,
+                            SIGIO,
+                            POLL_IN);
+            }
+
+            pr_info("Kthread inserted %u bytes into device %d FIFO\n",
+                    inserted,
+                    dev->device_id);
+        }
+        else
+        {
+            pr_info("Device %d FIFO full, thread event dropped\n",
+                    dev->device_id);
+        }
+    }
+
+    pr_info("Kthread stopping for device %d\n",
+            dev->device_id);
+
+    return 0;
+}
+
 
 static int ahmet_open(struct inode *inode, struct file *file)
 {
@@ -458,8 +543,31 @@ static int __init ahmet_init(void)
             goto free_device_buffers;
         }
 
-        mod_timer(&ahmet_devices[i].timer,
-          jiffies + msecs_to_jiffies(1000));
+        ahmet_devices[i].thread =
+            kthread_run(ahmet_thread_function,
+                &ahmet_devices[i],
+                "ahmet_fifo_thread_%d",
+                i);
+
+        if (IS_ERR(ahmet_devices[i].thread))
+        {
+            ret = PTR_ERR(
+                ahmet_devices[i].thread);
+
+            ahmet_devices[i].thread = NULL;
+
+            pr_err("Failed to create kthread for device %d: %d\n",
+                i,
+                ret);
+
+            kfifo_free(
+                &ahmet_devices[i].fifo);
+
+            mutex_destroy(
+                &ahmet_devices[i].ahmet_mutex);
+
+            goto free_device_buffers;
+        }
     }
 
     ret = alloc_chrdev_region(&dev_num, 0, DEVICE_COUNT, "ahmet");
@@ -557,54 +665,96 @@ static int __init ahmet_init(void)
         i= DEVICE_COUNT;
 
     free_device_buffers:
-        while(--i >= 0)
+    while (--i >= 0)
+    {
+        timer_shutdown_sync(
+            &ahmet_devices[i].timer);
+
+        cancel_work_sync(
+            &ahmet_devices[i].timer_work);
+
+        if (ahmet_devices[i].thread)
         {
-            timer_shutdown_sync(&ahmet_devices[i].timer);
+            kthread_stop(
+                ahmet_devices[i].thread);
 
-            cancel_work_sync(&ahmet_devices[i].timer_work);
-
-            mutex_destroy(&ahmet_devices[i].ahmet_mutex);
-            
-            kfifo_free(&ahmet_devices[i].fifo);
+            ahmet_devices[i].thread = NULL;
         }
-        
-        return ret;
+
+        kfifo_free(
+            &ahmet_devices[i].fifo);
+
+        mutex_destroy(
+            &ahmet_devices[i].ahmet_mutex);
+    }
+
+    return ret;
 }
 
 static void ahmet_cleanup(void)
 {
     int i;
 
-
+    /*
+     * Önce kullanıcı alanındaki cihazları kaldır.
+     * Böylece yeni open() işlemleri yapılamaz.
+     */
     for (i = 0; i < DEVICE_COUNT; i++)
     {
-        timer_shutdown_sync(&ahmet_devices[i].timer);
+        dev_t current_dev_num;
 
-        cancel_work_sync(&ahmet_devices[i].timer_work);
+        current_dev_num =
+            MKDEV(MAJOR(dev_num),
+                  MINOR(dev_num) + i);
 
-        mutex_destroy(&ahmet_devices[i].ahmet_mutex);
+        device_destroy(ahmet_class,
+                       current_dev_num);
 
-        kfifo_free(&ahmet_devices[i].fifo);
+        ahmet_device[i] = NULL;
     }
 
-
-    if(ahmet_class)
+    if (ahmet_class)
+    {
         class_destroy(ahmet_class);
+        ahmet_class = NULL;
+    }
 
-
-    for(i =0;i < DEVICE_COUNT;i++)
+    /*
+     * Character device kayıtlarını kaldır.
+     */
+    for (i = 0; i < DEVICE_COUNT; i++)
     {
         cdev_del(&ahmet_devices[i].cdev);
     }
 
-    unregister_chrdev_region(dev_num, DEVICE_COUNT);
+    unregister_chrdev_region(dev_num,
+                             DEVICE_COUNT);
 
-
-    for(i=0; i< DEVICE_COUNT;i++)
+    /*
+     * Aktif kernel işlerini durdur,
+     * ardından belleği yalnızca bir kez temizle.
+     */
+    for (i = 0; i < DEVICE_COUNT; i++)
     {
-        mutex_destroy(&ahmet_devices[i].ahmet_mutex);
+        timer_shutdown_sync(
+            &ahmet_devices[i].timer);
 
-        kfifo_free(&ahmet_devices[i].fifo);
+        cancel_work_sync(
+            &ahmet_devices[i].timer_work);
+
+        if (ahmet_devices[i].thread)
+        {
+            kthread_stop(
+                ahmet_devices[i].thread);
+
+            ahmet_devices[i].thread = NULL;
+        }
+
+        kfifo_free(
+            &ahmet_devices[i].fifo);
+
+        mutex_destroy(
+            &ahmet_devices[i].ahmet_mutex);
     }
 }
 
