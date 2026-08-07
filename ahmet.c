@@ -14,6 +14,9 @@
 #include <linux/timer.h>
 #include <linux/jiffies.h>
 #include <linux/workqueue.h>
+#include <linux/kthread.h>
+#include <linux/delay.h>
+
 
 #define BUFFER_SIZE PAGE_SIZE
 
@@ -67,6 +70,8 @@ struct fasync_struct *async_queue;
 
 struct timer_list timer;
 struct work_struct timer_work;
+
+struct task_struct *thread;
 
 wait_queue_head_t read_queue;
 };
@@ -132,6 +137,53 @@ static void ahmet_timer_callback(struct timer_list *timer)
     //                SIGIO,
     //                POLL_IN);
     //}
+}
+
+static int ahmet_thread_function(void *data)
+{
+    struct ahmet_device *dev = data;
+    static const char message[] = "Thread Event\n";
+    size_t message_len = sizeof(message) -1;
+
+    pr_info("Kthread started for device %d\n",
+            dev->device_id);
+
+    while ((!kthread_should_stop()))
+    {
+        if(msleep_interruptible(1000) &&
+            kthread_should_stop())
+            break;
+
+        mutex_lock(&dev->ahmet_mutex);
+
+        if(message_len <= dev->buffer_capacity)
+        {
+            memcpy(dev->buffer,
+                    message,
+                    message_len);
+
+            dev->buffer_size = message_len;
+        }
+
+        mutex_unlock(&dev->ahmet_mutex);
+
+        wake_up_interruptible(&dev->read_queue);
+
+        if(dev->async_queue)
+        {
+            kill_fasync(&dev->async_queue,
+                        SIGIO,
+                        POLL_IN);
+        }
+
+        pr_info("Kthread Data for device %d\n",
+            dev->device_id);
+    }
+
+    pr_info("Kthread stopping for device %d\n",
+            dev->device_id);
+
+    return 0;    
 }
 
 static int ahmet_open(struct inode *inode, struct file *file)
@@ -515,8 +567,26 @@ static int __init ahmet_init(void)
         ahmet_devices[i].buffer_capacity = BUFFER_SIZE;
         ahmet_devices[i].buffer_size = 0;
 
+        ahmet_devices[i].thread = 
+            kthread_run(ahmet_thread_function,
+                        &ahmet_devices[i],
+                        "ahmet_thread_%d",
+                        i);
+        
+        if(IS_ERR(ahmet_devices[i].thread))
+        {
+            ret =PTR_ERR(ahmet_devices[i].thread);
+            ahmet_devices[i].thread = NULL;
+
+            pr_err("Failed to create kthread for device %d: %d\n",
+                    i,
+                    ret);
+        }
+
+        /*
         mod_timer(&ahmet_devices[i].timer,
                     jiffies + msecs_to_jiffies(1000));
+        */
     }
 
     //ahmet_dev = kzalloc(sizeof(*ahmet_dev), GFP_KERNEL);
@@ -718,6 +788,12 @@ static void ahmet_cleanup(void)
         timer_shutdown_sync(&ahmet_devices[i].timer);
 
         cancel_work_sync(&ahmet_devices[i].timer_work);
+
+        if(ahmet_devices[i].thread)
+        {
+            kthread_stop(ahmet_devices[i].thread);
+            ahmet_devices[i].thread = NULL;
+        }
 
         mutex_destroy(&ahmet_devices[i].ahmet_mutex);
 
