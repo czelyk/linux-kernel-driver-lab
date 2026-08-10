@@ -18,6 +18,9 @@
 #include <linux/workqueue.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
+#include <linux/semaphore.h>
+#include <linux/atomic.h>
+#include <linux/completion.h>
 
 #define BUFFER_SIZE PAGE_SIZE
 
@@ -64,11 +67,13 @@ struct ahmet_device
 
     struct mutex ahmet_mutex;
 
-    spinlock_t stats_lock;
-    unsigned long produced_events;
-    unsigned long read_events;
-    unsigned long dropped_events;
-    unsigned long timer_callbacks;
+    struct completion test_completion;
+    struct work_struct completion_work;
+
+    atomic_t produced_events;
+    atomic_t read_events;
+    atomic_t dropped_events;
+    atomic_t timer_callbacks;
 
     struct fasync_struct *async_queue;
 
@@ -78,6 +83,7 @@ struct ahmet_device
     struct timer_list timer;
     struct work_struct timer_work;
     struct task_struct *thread;
+    struct semaphore open_sem;
 };
 
 //static struct ahmet_device *ahmet_dev;
@@ -127,11 +133,13 @@ static void ahmet_timer_callback(struct timer_list *timer)
                        struct ahmet_device,
                        timer);
 
-    spin_lock(&dev->stats_lock);
+    //spin_lock(&dev->stats_lock);
 
-    dev->timer_callbacks++;
+    //dev->timer_callbacks++;
 
-    spin_unlock(&dev->stats_lock);
+    //spin_unlock(&dev->stats_lock);
+
+    atomic_inc(&dev->timer_callbacks);
     
     schedule_work(&dev->timer_work);
 
@@ -151,6 +159,18 @@ static int ahmet_thread_function(void *data)
     unsigned long timer_count;
 
     pr_info("Kthread started for device %d\n",
+            dev->device_id);
+
+    reinit_completion(&dev->test_completion);
+
+    schedule_work(&dev->completion_work);
+
+    pr_info("Kthread waiting for completion on device %d\n",
+            dev->device_id);
+
+    wait_for_completion(&dev->test_completion);
+
+    pr_info("Kthread completion received on device %d\n",
             dev->device_id);
 
     while (!kthread_should_stop())
@@ -194,11 +214,13 @@ static int ahmet_thread_function(void *data)
 
         if (inserted == message_len)
         {
-            spin_lock_bh(&dev->stats_lock);
+            //spin_lock_bh(&dev->stats_lock);
 
-            dev->produced_events++;
+            //dev->produced_events++;
 
-            spin_unlock_bh(&dev->stats_lock);
+            //spin_unlock_bh(&dev->stats_lock);
+
+            atomic_inc(&dev->produced_events);
 
             wake_up_interruptible(&dev->read_queue);
 
@@ -215,25 +237,19 @@ static int ahmet_thread_function(void *data)
         }
         else
         {
-            spin_lock_bh(&dev->stats_lock);
-
-            dev->dropped_events++;
-
-            spin_unlock_bh(&dev->stats_lock);
+            atomic_inc(&dev->dropped_events);
 
             pr_info("Device %d FIFO full, thread event dropped\n",
                     dev->device_id);
         }
     }
 
-    spin_lock_bh(&dev->stats_lock);
+    produced = atomic_read(&dev->produced_events);
+    read_count = atomic_read(&dev->read_events);
+    dropped = atomic_read(&dev->dropped_events);
+    timer_count = atomic_read(&dev->timer_callbacks);
 
-    produced = dev->produced_events;
-    read_count = dev->read_events;
-    dropped = dev->dropped_events;
-    timer_count = dev->timer_callbacks;
 
-    spin_unlock_bh(&dev->stats_lock);
 
     pr_info("Device %d stats: produced=%lu read=%lu dropped=%lu timer=%lu\n",
         dev->device_id,
@@ -248,6 +264,25 @@ static int ahmet_thread_function(void *data)
     return 0;
 }
 
+static void ahmet_completion_work(struct work_struct *work)
+{
+    struct ahmet_device *dev;
+
+    dev = container_of(work,
+                        struct ahmet_device,
+                        completion_work);
+
+    pr_info("Completion worker running for device %d\n",
+            dev->device_id);
+
+    msleep(500);
+
+    pr_info("Completion worker finished for device %d\n",
+            dev->device_id);
+
+    complete(&dev->test_completion);
+}
+
 
 static int ahmet_open(struct inode *inode, struct file *file)
 {
@@ -256,6 +291,11 @@ static int ahmet_open(struct inode *inode, struct file *file)
     dev = container_of(inode->i_cdev,
                         struct ahmet_device,
                         cdev);
+
+    if(down_interruptible(&dev->open_sem))
+    {
+        return -ERESTARTSYS;
+    }
 
     file->private_data = dev;
 
@@ -269,11 +309,15 @@ static int ahmet_release(struct inode *inode, struct file *file)
     struct ahmet_device *dev = file->private_data;
 
     (void) inode;
-    
+
     fasync_helper(-1,
               file,
               0,
               &dev->async_queue);
+    
+    
+    up(&dev->open_sem);
+    
     pr_info("Device closed\n");
     return 0;
 }
@@ -319,11 +363,7 @@ static ssize_t ahmet_read(struct file *file,
 
     if (copied > 0)
     {
-        spin_lock_bh(&dev->stats_lock);
-
-        dev->read_events++;
-
-        spin_unlock_bh(&dev->stats_lock);
+        atomic_inc(&dev->read_events); 
     }
 
     wake_up_interruptible(&dev->write_queue);
@@ -570,19 +610,26 @@ static int __init ahmet_init(void)
         ahmet_devices[i].device_id = i;
         mutex_init(&ahmet_devices[i].ahmet_mutex);
 
-        spin_lock_init(&ahmet_devices[i].stats_lock);
+        //spin_lock_init(&ahmet_devices[i].stats_lock);
 
-        ahmet_devices[i].produced_events = 0;
-        ahmet_devices[i].read_events = 0;
-        ahmet_devices[i].dropped_events = 0;
+        sema_init(&ahmet_devices[i].open_sem, 1);
 
-        ahmet_devices[i].timer_callbacks = 0;
+        atomic_set(&ahmet_devices[i].produced_events, 0);
+        atomic_set(&ahmet_devices[i].read_events, 0);
+        atomic_set(&ahmet_devices[i].dropped_events, 0);
+
+        atomic_set(&ahmet_devices[i].timer_callbacks, 0);
         
         init_waitqueue_head(&ahmet_devices[i].read_queue);
         init_waitqueue_head(&ahmet_devices[i].write_queue);
 
         INIT_WORK(&ahmet_devices[i].timer_work,
           ahmet_timer_work);
+
+        init_completion(&ahmet_devices[i].test_completion);
+
+        INIT_WORK(&ahmet_devices[i].completion_work,
+                    ahmet_completion_work);
 
         timer_setup(&ahmet_devices[i].timer,
             ahmet_timer_callback,
@@ -729,25 +776,21 @@ static int __init ahmet_init(void)
     free_device_buffers:
     while (--i >= 0)
     {
-        timer_shutdown_sync(
-            &ahmet_devices[i].timer);
+        timer_shutdown_sync(&ahmet_devices[i].timer);
 
-        cancel_work_sync(
-            &ahmet_devices[i].timer_work);
+        cancel_work_sync(&ahmet_devices[i].timer_work);
 
         if (ahmet_devices[i].thread)
         {
-            kthread_stop(
-                ahmet_devices[i].thread);
-
+            kthread_stop(ahmet_devices[i].thread);
             ahmet_devices[i].thread = NULL;
         }
 
-        kfifo_free(
-            &ahmet_devices[i].fifo);
+        cancel_work_sync(&ahmet_devices[i].completion_work);
 
-        mutex_destroy(
-            &ahmet_devices[i].ahmet_mutex);
+        kfifo_free(&ahmet_devices[i].fifo);
+
+        mutex_destroy(&ahmet_devices[i].ahmet_mutex);
     }
 
     return ret;
@@ -811,6 +854,9 @@ static void ahmet_cleanup(void)
 
             ahmet_devices[i].thread = NULL;
         }
+
+        cancel_work_sync(
+            &ahmet_devices[i].completion_work);
 
         kfifo_free(
             &ahmet_devices[i].fifo);
