@@ -21,6 +21,9 @@
 #include <linux/semaphore.h>
 #include <linux/atomic.h>
 #include <linux/completion.h>
+#include <linux/debugfs.h>
+#include <linux/seq_file.h>
+#include <linux/proc_fs.h>
 
 #define BUFFER_SIZE PAGE_SIZE
 
@@ -49,15 +52,8 @@
 static dev_t dev_num;
 static struct class *ahmet_class;
 static struct device *ahmet_device[DEVICE_COUNT];
-
-//static char buffer[BUFFER_SIZE];
-
-
-//static char *buffer;
-//static size_t buffer_size = 0;
-//static size_t buffer_capacity = 0;
-
-//static struct mutex ahmet_mutex;
+static struct dentry *ahmet_debugfs_root;
+static struct proc_dir_entry *ahmet_proc_entry;
 
 struct ahmet_device
 {
@@ -74,6 +70,7 @@ struct ahmet_device
     atomic_t read_events;
     atomic_t dropped_events;
     atomic_t timer_callbacks;
+    bool timer_enabled;
 
     struct fasync_struct *async_queue;
 
@@ -89,6 +86,149 @@ struct ahmet_device
 //static struct ahmet_device *ahmet_dev;
 
 static struct ahmet_device ahmet_devices[DEVICE_COUNT];
+
+static ssize_t fifo_len_show(struct device *device,
+                            struct device_attribute *attr,
+                            char *buf)
+{
+    struct ahmet_device *dev;
+    unsigned int len;
+
+    dev = dev_get_drvdata(device);
+
+    mutex_lock(&dev->ahmet_mutex);
+
+    len = kfifo_len(&dev->fifo);
+
+    mutex_unlock(&dev->ahmet_mutex);
+
+    return sysfs_emit(buf, "%u\n", len);
+}
+
+static DEVICE_ATTR_RO(fifo_len);
+
+static ssize_t fifo_capacity_show(struct device *device,
+                                  struct device_attribute *attr,
+                                  char *buf)
+{
+    struct ahmet_device *dev;
+    unsigned int capacity;
+
+    dev = dev_get_drvdata(device);
+
+    mutex_lock(&dev->ahmet_mutex);
+    capacity = kfifo_size(&dev->fifo);
+    mutex_unlock(&dev->ahmet_mutex);
+
+    return sysfs_emit(buf, "%u\n", capacity);
+}
+
+static DEVICE_ATTR_RO(fifo_capacity);
+
+static ssize_t produced_events_show(struct device *device,
+                                    struct device_attribute *attr,
+                                    char *buf)
+{
+    struct ahmet_device *dev;
+
+    dev = dev_get_drvdata(device);
+
+    return sysfs_emit(buf, "%d\n",
+                      atomic_read(&dev->produced_events));
+}
+
+static DEVICE_ATTR_RO(produced_events);
+
+static ssize_t read_events_show(struct device *device,
+                                struct device_attribute *attr,
+                                char *buf)
+{
+    struct ahmet_device *dev;
+
+    dev = dev_get_drvdata(device);
+
+    return sysfs_emit(buf, "%d\n",
+                      atomic_read(&dev->read_events));
+}
+
+static DEVICE_ATTR_RO(read_events);
+
+static ssize_t dropped_events_show(struct device *device,
+                                   struct device_attribute *attr,
+                                   char *buf)
+{
+    struct ahmet_device *dev;
+
+    dev = dev_get_drvdata(device);
+
+    return sysfs_emit(buf, "%d\n",
+                      atomic_read(&dev->dropped_events));
+}
+
+static DEVICE_ATTR_RO(dropped_events);
+
+static ssize_t timer_callbacks_show(struct device *device,
+                                    struct device_attribute *attr,
+                                    char *buf)
+{
+    struct ahmet_device *dev;
+
+    dev = dev_get_drvdata(device);
+
+    return sysfs_emit(buf, "%d\n",
+                      atomic_read(&dev->timer_callbacks));
+}
+
+static DEVICE_ATTR_RO(timer_callbacks);
+
+static ssize_t timer_enabled_show(struct device *device,
+                                    struct device_attribute *attr,
+                                    char *buf)
+{
+    struct ahmet_device *dev;
+
+    dev = dev_get_drvdata(device);
+
+    return sysfs_emit(buf, "%d\n",
+                        dev->timer_enabled ? 1 : 0);
+}
+
+static ssize_t timer_enabled_store(struct device *device,
+                                    struct device_attribute *attr,
+                                    const char *buf,
+                                    size_t count)
+{
+    struct ahmet_device *dev;
+    bool value;
+    int ret;
+
+    dev = dev_get_drvdata(device);
+
+    ret = kstrtobool(buf, &value);
+    if (ret)
+        return ret;
+
+    dev->timer_enabled = value;
+
+    return count;
+}
+
+static DEVICE_ATTR_RW(timer_enabled);
+
+static struct attribute *ahmet_attrs[] = {
+    &dev_attr_fifo_len.attr,
+    &dev_attr_fifo_capacity.attr,
+    &dev_attr_produced_events.attr,
+    &dev_attr_read_events.attr,
+    &dev_attr_dropped_events.attr,
+    &dev_attr_timer_callbacks.attr,
+    &dev_attr_timer_enabled.attr,
+    NULL
+};
+
+static const struct attribute_group ahmet_attr_group = {
+    .attrs = ahmet_attrs,
+};
 
 static void ahmet_timer_work(struct work_struct *work)
 {
@@ -141,11 +281,123 @@ static void ahmet_timer_callback(struct timer_list *timer)
 
     atomic_inc(&dev->timer_callbacks);
     
-    schedule_work(&dev->timer_work);
+    if (dev->timer_enabled)
+        schedule_work(&dev->timer_work);
 
     mod_timer(&dev->timer,
               jiffies + msecs_to_jiffies(1000));
 }
+
+static int ahmet_debugfs_stats_show(struct seq_file *m,
+                                    void *v)
+{
+    struct ahmet_device *dev = m->private;
+    unsigned int fifo_len;
+    unsigned int fifo_size;
+    unsigned int fifo_avail;
+
+    mutex_lock(&dev->ahmet_mutex);
+
+    fifo_len = kfifo_len(&dev->fifo);
+    fifo_size = kfifo_size(&dev->fifo);
+    fifo_avail = kfifo_avail(&dev->fifo);
+
+    mutex_unlock(&dev->ahmet_mutex);
+
+    seq_printf(m, "device_id:   %d\n",
+                dev->device_id);
+
+    seq_printf(m, "fifo_len:         %u\n",
+               fifo_len);
+
+    seq_printf(m, "fifo_capacity:    %u\n",
+               fifo_size);
+
+    seq_printf(m, "fifo_available:   %u\n",
+               fifo_avail);
+
+    seq_printf(m, "produced_events:  %d\n",
+               atomic_read(&dev->produced_events));
+
+    seq_printf(m, "read_events:      %d\n",
+               atomic_read(&dev->read_events));
+
+    seq_printf(m, "dropped_events:   %d\n",
+               atomic_read(&dev->dropped_events));
+
+    seq_printf(m, "timer_callbacks:  %d\n",
+               atomic_read(&dev->timer_callbacks));
+
+    seq_printf(m, "timer_enabled:    %d\n",
+               dev->timer_enabled ? 1 : 0);
+
+    return 0;
+}
+
+static int ahmet_debugfs_stats_open(struct inode *inode,
+                                    struct file *file)
+{
+    return single_open(file,
+                       ahmet_debugfs_stats_show,
+                       inode->i_private);
+}
+
+static const struct file_operations ahmet_debugfs_fops = {
+    .owner   = THIS_MODULE,
+    .open    = ahmet_debugfs_stats_open,
+    .read    = seq_read,
+    .llseek  = seq_lseek,
+    .release = single_release,
+};
+
+static int ahmet_proc_show(struct seq_file *m, void *v)
+{
+    int i;
+
+    for (i = 0; i < DEVICE_COUNT; i++)
+    {
+        struct ahmet_device *dev = &ahmet_devices[i];
+        unsigned int fifo_len;
+
+        mutex_lock(&dev->ahmet_mutex);
+        fifo_len = kfifo_len(&dev->fifo);
+        mutex_unlock(&dev->ahmet_mutex);
+
+        seq_printf(m,
+                   "Device %d\n"
+                   "  fifo_len: %u\n"
+                   "  produced: %d\n"
+                   "  read: %d\n"
+                   "  dropped: %d\n"
+                   "  timer_callbacks: %d\n"
+                   "  timer_enabled: %d\n\n",
+                   dev->device_id,
+                   fifo_len,
+                   atomic_read(&dev->produced_events),
+                   atomic_read(&dev->read_events),
+                   atomic_read(&dev->dropped_events),
+                   atomic_read(&dev->timer_callbacks),
+                   dev->timer_enabled ? 1 : 0);
+    }
+
+    return 0;
+}
+
+static int ahmet_proc_open(struct inode *inode,
+                           struct file *file)
+{
+    return single_open(file,
+                       ahmet_proc_show,
+                       NULL);
+}
+
+static const struct proc_ops ahmet_proc_ops = {
+    .proc_open    = ahmet_proc_open,
+    .proc_read    = seq_read,
+    .proc_lseek   = seq_lseek,
+    .proc_release = single_release,
+};
+
 
 static int ahmet_thread_function(void *data)
 {
@@ -619,6 +871,7 @@ static int __init ahmet_init(void)
         atomic_set(&ahmet_devices[i].dropped_events, 0);
 
         atomic_set(&ahmet_devices[i].timer_callbacks, 0);
+        ahmet_devices[i].timer_enabled = true;
         
         init_waitqueue_head(&ahmet_devices[i].read_queue);
         init_waitqueue_head(&ahmet_devices[i].write_queue);
@@ -729,23 +982,93 @@ static int __init ahmet_init(void)
         ahmet_class,
         NULL,
         current_dev_num,
-        NULL,
+        &ahmet_devices[i],
         "ahmet_fifo%d",
         i
-        );
+    );
 
-        if(IS_ERR(ahmet_device[i]))
-        {
-            ret = PTR_ERR(ahmet_device[i]);
-            pr_err("Failed to create device %d\n", i);
-            goto destroy_devices;
-        }
+    if (IS_ERR(ahmet_device[i]))
+    {
+        ret = PTR_ERR(ahmet_device[i]);
+        ahmet_device[i] = NULL;
+
+        pr_err("Failed to create device %d\n", i);
+        goto destroy_devices;
     }
 
+    ret = sysfs_create_group(
+        &ahmet_device[i]->kobj,
+        &ahmet_attr_group
+    );
+
+    if (ret)
+    {
+        pr_err("Failed to create sysfs group for device %d\n",
+                i);
+
+        device_destroy(ahmet_class,
+                        current_dev_num);
+
+        ahmet_device[i] = NULL;
+
+        goto destroy_devices;
+    }
+
+}
+
+    ahmet_debugfs_root =
+        debugfs_create_dir("ahmet_fifo", NULL);
+
+        if (IS_ERR(ahmet_debugfs_root))
+    {
+        ret = PTR_ERR(ahmet_debugfs_root);
+        ahmet_debugfs_root = NULL;
+
+        pr_err("Failed to create debugfs directory\n");
+
+        goto destroy_devices;
+    }
+
+    for (i = 0; i < DEVICE_COUNT; i++)
+    {
+        char name[32];
+
+        snprintf(name,
+                sizeof(name),
+                "device%d_stats",
+                i);
+
+        debugfs_create_file(
+            name,
+            0444,
+            ahmet_debugfs_root,
+            &ahmet_devices[i],
+            &ahmet_debugfs_fops
+        );
+    }
+
+    ahmet_proc_entry =
+    proc_create("ahmet_fifo_stats",
+                0444,
+                NULL,
+                &ahmet_proc_ops);
+
+    if (!ahmet_proc_entry)
+    {
+        pr_err("Failed to create proc entry\n");
+
+        debugfs_remove_recursive(ahmet_debugfs_root);
+        ahmet_debugfs_root = NULL;
+
+        ret = -ENOMEM;
+
+        goto destroy_devices;
+    }
 
     pr_info("Ahmet character device added\n");
 
     return 0;
+
 
     destroy_devices:
         while (--i >=0)
@@ -755,8 +1078,18 @@ static int __init ahmet_init(void)
             current_dev_num = MKDEV(MAJOR(dev_num),
                                     MINOR(dev_num) + i);
 
-            device_destroy(ahmet_class, current_dev_num);
-            ahmet_device[i] = NULL;
+            if (ahmet_device[i])
+            {
+                sysfs_remove_group(
+                    &ahmet_device[i]->kobj,
+                    &ahmet_attr_group
+                );
+
+                device_destroy(ahmet_class,
+                            current_dev_num);
+
+                ahmet_device[i] = NULL;
+            }
         }
 
         i = DEVICE_COUNT;
@@ -764,6 +1097,7 @@ static int __init ahmet_init(void)
 
 
         class_destroy(ahmet_class);
+
 
     unregister_cdevs:
         while(--i >=0)
@@ -800,10 +1134,15 @@ static void ahmet_cleanup(void)
 {
     int i;
 
-    /*
-     * Önce kullanıcı alanındaki cihazları kaldır.
-     * Böylece yeni open() işlemleri yapılamaz.
-     */
+        if (ahmet_proc_entry)
+    {
+        proc_remove(ahmet_proc_entry);
+        ahmet_proc_entry = NULL;
+    }
+    
+    debugfs_remove_recursive(ahmet_debugfs_root);
+    ahmet_debugfs_root = NULL;
+
     for (i = 0; i < DEVICE_COUNT; i++)
     {
         dev_t current_dev_num;
@@ -812,11 +1151,22 @@ static void ahmet_cleanup(void)
             MKDEV(MAJOR(dev_num),
                   MINOR(dev_num) + i);
 
-        device_destroy(ahmet_class,
-                       current_dev_num);
+        if (ahmet_device[i])
+        {
+            sysfs_remove_group(
+                &ahmet_device[i]->kobj,
+                &ahmet_attr_group
+            );
 
-        ahmet_device[i] = NULL;
+            device_destroy(
+                ahmet_class,
+                current_dev_num
+            );
+
+            ahmet_device[i] = NULL;
+        }
     }
+    
 
     if (ahmet_class)
     {
