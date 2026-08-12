@@ -190,7 +190,7 @@ static ssize_t timer_enabled_show(struct device *device,
     dev = dev_get_drvdata(device);
 
     return sysfs_emit(buf, "%d\n",
-                        dev->timer_enabled ? 1 : 0);
+                        READ_ONCE(dev->timer_enabled) ? 1 : 0);
 }
 
 static ssize_t timer_enabled_store(struct device *device,
@@ -208,7 +208,7 @@ static ssize_t timer_enabled_store(struct device *device,
     if (ret)
         return ret;
 
-    dev->timer_enabled = value;
+    WRITE_ONCE(dev->timer_enabled, value);
 
     return count;
 }
@@ -281,7 +281,7 @@ static void ahmet_timer_callback(struct timer_list *timer)
 
     atomic_inc(&dev->timer_callbacks);
     
-    if (dev->timer_enabled)
+    if (READ_ONCE(dev->timer_enabled))
         schedule_work(&dev->timer_work);
 
     mod_timer(&dev->timer,
@@ -329,7 +329,7 @@ static int ahmet_debugfs_stats_show(struct seq_file *m,
                atomic_read(&dev->timer_callbacks));
 
     seq_printf(m, "timer_enabled:    %d\n",
-               dev->timer_enabled ? 1 : 0);
+               READ_ONCE(dev->timer_enabled) ? 1 : 0);
 
     return 0;
 }
@@ -377,7 +377,7 @@ static int ahmet_proc_show(struct seq_file *m, void *v)
                    atomic_read(&dev->read_events),
                    atomic_read(&dev->dropped_events),
                    atomic_read(&dev->timer_callbacks),
-                   dev->timer_enabled ? 1 : 0);
+                   READ_ONCE(dev->timer_enabled) ? 1 : 0);
     }
 
     return 0;
@@ -1139,7 +1139,7 @@ static void ahmet_cleanup(void)
         proc_remove(ahmet_proc_entry);
         ahmet_proc_entry = NULL;
     }
-    
+
     debugfs_remove_recursive(ahmet_debugfs_root);
     ahmet_debugfs_root = NULL;
 
